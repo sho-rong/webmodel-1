@@ -51,13 +51,6 @@ lone abstract sig Cache{
 	current: one Int,
 	reqtime: one Int,
 	restime: one Int
-/*	a: one Int,
-	b: one Int,
-	c: one Int,
-	d: one Int,
-	e: one Int,
-	f: one Int,
-	g: one Int*/
 }{
 	current > 0
 	reqtime > 0
