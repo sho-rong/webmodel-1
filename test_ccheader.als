@@ -63,8 +63,8 @@ lone abstract sig Cache{
 
 sig PrivateCache extends Cache{}{
 	#stored>0 implies	//for expiration date
-		(some op:Maxage | op in HTTPResponse.headers.options) or 
-		(some d:DateHeader, e:ExpiresHeader | d in HTTPResponse.headers and e in HTTPResponse.headers)
+		(one op:Maxage | op in HTTPResponse.headers.options) or 
+		(one d:DateHeader, e:ExpiresHeader | d in HTTPResponse.headers and e in HTTPResponse.headers)
 
 	#stored>0 and #(HTTPResponse -> Maxage)>0 implies	//for Maxage
 		let A = HTTPResponse.headers.age, D = HTTPResponse.headers.date |
