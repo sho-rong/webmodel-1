@@ -124,8 +124,20 @@ fact LimitHeader{
 
 pred show(){	
 	#PrivateCache.stored = 1
-	#Maxage = 1
-	#ExpiresHeader = 0
+	#Maxage = 0
+	#ExpiresHeader = 1
 }
 
 run show for 5
+
+assert checkPrivate{
+	#Private > 0 implies #PublicCache.stored = 0
+}
+
+check checkPrivate for 10
+
+assert checkNoStore{
+	#NoStore > 0 implies #Cache.stored = 0
+}
+
+check checkNoStore for 10
