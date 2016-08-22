@@ -529,17 +529,17 @@ sig ExpiresHeader extends HTTPEntityHeader{expire: one Int}{expire > 0}
 abstract sig CacheOption
 abstract sig RequestCacheOption extends CacheOption{}
 abstract sig ResponseCacheOption extends CacheOption{}
-lone sig NoCache,NoStore,NoTransform extends CacheOption{}
-lone sig OnlyIfCached extends RequestCacheOption{}
-lone sig MaxStale,MinStale extends RequestCacheOption{time: one Int}
-lone sig MustRevalidate,Public,Private,ProxyRevalidate extends ResponseCacheOption{}
-lone sig Maxage,SMaxage extends ResponseCacheOption{time: one Int}
+sig NoCache,NoStore,NoTransform extends CacheOption{}
+sig OnlyIfCached extends RequestCacheOption{}
+sig MaxStale,MinStale extends RequestCacheOption{time: one Int}
+sig MustRevalidate,Public,Private,ProxyRevalidate extends ResponseCacheOption{}
+sig Maxage,SMaxage extends ResponseCacheOption{time: one Int}
 
 abstract sig HTTPIntermediary extends HTTPConformist{}
 sig HTTPProxy extends HTTPIntermediary{}
 sig HTTPGateway extends HTTPIntermediary{}
 
-lone abstract sig Cache{
+abstract sig Cache{
 	stored: lone HTTPResponse,
 	current: one Int,
 	reqtime: one Int,
@@ -614,23 +614,3 @@ fact LimitHeader{
 	lone h:AgeHeader | h in HTTPRequest.headers
 	lone h:AgeHeader | h in HTTPResponse.headers
 }
-
-pred show(){	
-	#PrivateCache.stored = 1
-	#Maxage = 0
-	#ExpiresHeader = 1
-}
-
-run show for 5
-
-assert checkPrivate{
-	#Private > 0 implies #PublicCache.stored = 0
-}
-
-check checkPrivate for 10
-
-assert checkNoStore{
-	#NoStore > 0 implies #Cache.stored = 0
-}
-
-check checkNoStore for 10
