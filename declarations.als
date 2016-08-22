@@ -515,34 +515,16 @@ run basicModelIsConsistent  for 8 but 3 HTTPResponse//, 3 HTTPRequest,
 //
 //
 sig PragmaHeader extends HTTPRequestHeader{}
-sig IfModifiedSinceHeader extends HTTPRequestHeader{
-	modified: one Time
-}
-sig IfNoneMatchHeader extends HTTPRequestHeader{
-	etag: one Int
-}
-sig ETagHeader extends HTTPResponseHeader{
-	etag: one Int
-}
-sig LastModifiedHeader extends HTTPResponseHeader{
-	modified: one Int
-}
-sig AgeHeader extends HTTPResponseHeader{
-	modified: one Int
-}
-sig CacheControlHeader extends HTTPGeneralHeader{
-	options : set CacheOption
-}
-sig DateHeader extends HTTPGeneralHeader{
-	generation: one Int
-}
-sig ConnectionHeader extends HTTPGeneralHeader{
-	next: one HTTPConformist
-}
+sig IfModifiedSinceHeader extends HTTPRequestHeader{modified: one Time}
+sig IfNoneMatchHeader extends HTTPRequestHeader{etag: one Int}
+sig ETagHeader extends HTTPResponseHeader{etag: one Int}
+sig LastModifiedHeader extends HTTPResponseHeader{modified: one Int}
+sig AgeHeader extends HTTPResponseHeader{age : one Int}{age > 0}
+sig CacheControlHeader extends HTTPGeneralHeader{options : set CacheOption}
+sig DateHeader extends HTTPGeneralHeader{date: one Int}{date > 0}
+sig ConnectionHeader extends HTTPGeneralHeader{next: one HTTPConformist}
 sig WarningHeader extends HTTPGeneralHeader{}
-sig ExpiresHeader extends HTTPEntityHeader{
-	expire: one Int
-}
+sig ExpiresHeader extends HTTPEntityHeader{expire: one Int}{expire > 0}
 
 abstract sig CacheOption
 abstract sig RequestCacheOption extends CacheOption{}
@@ -557,19 +539,3 @@ abstract sig HTTPIntermediary extends HTTPConformist{}
 sig HTTPProxy extends HTTPIntermediary{}
 sig HTTPGateway extends HTTPIntermediary{}
 
-//レスポンスおよびリクエストにのみ使えるような値の制限
-fact ContentOfCacheControlHeader{
-	no resoption:ResponseCacheOption | resoption in HTTPRequest.headers.options
-	no reqoption:RequestCacheOption | reqoption in HTTPResponse.headers.options
-}
-
-//リクエストヘッダおよびレスポンスヘッダの制限
-fact ResAndReqHeader{
-	no resh:HTTPResponseHeader | resh in HTTPRequest.headers
-	no reqh:HTTPRequestHeader | reqh in HTTPResponse.headers
-}
-
-//ヘッダに含まれないCacheOptionの存在の否定
-fact CacheOptionInHeader{
-	all coption:CacheOption | coption in CacheControlHeader.options
-}
