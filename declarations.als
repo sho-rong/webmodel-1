@@ -124,12 +124,10 @@ abstract sig Status  {}
 abstract sig RedirectionStatus extends Status {}
 
 fact noOrphanedHeaders {
-  all h:HTTPRequestHeader|some req:HTTPRequest|h in req.headers
-  all h:HTTPResponseHeader|some resp:HTTPResponse|h in resp.headers
-  
-  //
-  //
-  //
+	all h:HTTPRequestHeader|some req:HTTPRequest|h in req.headers
+	all h:HTTPResponseHeader|some resp:HTTPResponse|h in resp.headers
+	all h:HTTPGeneralHeader|some req:HTTPRequest, resp:HTTPResponse|h in req.headers or h in resp.headers
+	all h:HTTPEntityHeader|some req:HTTPRequest, resp:HTTPResponse|h in req.headers or h in resp.headers
 }
 
 abstract sig HTTPEvent extends NetworkEvent {
@@ -372,9 +370,11 @@ fact NormalPrincipalsDontReuseCookies{
 	}
 }
 
+/*
 run show2 {
 	some (SetCookieHeader).thecookie
 } for 6
+*/
 
 /***********************
 
@@ -492,7 +492,7 @@ pred somePasswordExists {
   some UserPassword //|p.madeBy in Alice
 }
 
-run somePasswordExists for 8
+//run somePasswordExists for 8
 
 
 pred basicModelIsConsistent {
@@ -502,7 +502,8 @@ pred basicModelIsConsistent {
     some (t1.resp)
   }
 }
-run basicModelIsConsistent  for 8 but 3 HTTPResponse//, 3 HTTPRequest, 
+
+//run basicModelIsConsistent  for 8 but 3 HTTPResponse//, 3 HTTPRequest, 
 
 // run findBasicModelInstance  for 6  but 2 HTTPResponse, 
 //2 HTTPRequest, 2 RequestAPI, 0 GOOD, 0 SECURE ,2 Secret, 0 String1
@@ -514,6 +515,8 @@ run basicModelIsConsistent  for 8 but 3 HTTPResponse//, 3 HTTPRequest,
 //Editing...
 //
 //
+
+/*
 sig PragmaHeader extends HTTPRequestHeader{}
 sig IfModifiedSinceHeader extends HTTPRequestHeader{modified: one Time}
 sig IfNoneMatchHeader extends HTTPRequestHeader{etag: one Int}
@@ -540,7 +543,7 @@ sig HTTPProxy extends HTTPIntermediary{}
 sig HTTPGateway extends HTTPIntermediary{}
 
 abstract sig Cache{
-	stored: lone HTTPResponse,
+	stored: set HTTPResponse,
 	current: one Int,
 	reqtime: one Int,
 	restime: one Int
@@ -584,7 +587,7 @@ sig PublicCache extends Cache{}{
 		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, ExpiresHeader.expire.minus[DateHeader.date], restime, reqtime, current] > 0
 }
 
-fun getExpiration[A:Int, D:Int, E:Int, restime:Int, reqtime:Int, current:Int]:Int{
+fun getExpiration[A:Int, D:Int, E:Int, restime:Int, reqtime:Int, current:Int]:Int{	// calculate expiration date
 	let apparent = (restime.minus[D] > 0 implies restime.minus[D] else 0), corrected = A.plus[restime.minus[reqtime]] | 
 		let initial = (apparent > corrected implies apparent else corrected) | 
 			E.minus[initial.plus[current.minus[restime]]]
@@ -600,3 +603,9 @@ fact LimitHeader{
 	all res:HTTPResponse | some h:ExpiresHeader | res in Cache.stored and h in res.headers
 	all res:HTTPResponse | some h:AgeHeader | res in Cache.stored and h in res.headers
 }
+*/
+
+run show{
+	#HTTPRequest > 0
+	#HTTPResponse > 0
+} for 4
