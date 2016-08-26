@@ -560,16 +560,10 @@ sig PrivateCache extends Cache{}{
 		(one d:DateHeader, e:ExpiresHeader | d in HTTPResponse.headers and e in HTTPResponse.headers)
 
 	#stored>0 and #(HTTPResponse -> Maxage)>0 implies	//for Maxage
-		let A = HTTPResponse.headers.age, D = HTTPResponse.headers.date |
-			let apparent = (restime.minus[D] > 0 implies restime.minus[D] else 0), corrected = A.plus[restime.minus[reqtime]] | 
-				let initial = (apparent > corrected implies apparent else corrected) | 
-					Maxage.time.minus[initial.plus[current.minus[restime]]] > 0
+		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, Maxage.time, restime, reqtime, current] > 0
 
 	#stored>0 and #(HTTPResponse -> ExpiresHeader)>0 and #(HTTPResponse -> Maxage)=0 implies	//for ExpiresHeader and DateHeader
-		let A = HTTPResponse.headers.age, D = HTTPResponse.headers.date |
-			let apparent = restime.minus[D] > 0 implies restime.minus[D] else 0, corrected = A.plus[restime.minus[reqtime]] | 
-				let initial = apparent > corrected implies apparent else corrected | 
-					all e:ExpiresHeader.expire, d:DateHeader.date | e.minus[d].minus[initial.plus[current.minus[restime]]] > 0
+		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, ExpiresHeader.expire.minus[DateHeader.date], restime, reqtime, current] > 0
 }
 
 sig PublicCache extends Cache{}{
@@ -581,22 +575,19 @@ sig PublicCache extends Cache{}{
 		(some d:DateHeader, e:ExpiresHeader | d in HTTPResponse.headers and e in HTTPResponse.headers)
 	
 	#stored>0 and #(HTTPResponse -> SMaxage)>0 implies	//for SMaxage
-		let A = HTTPResponse.headers.age, D = HTTPResponse.headers.date |
-			let apparent = restime.minus[D] > 0 implies restime.minus[D] else 0, corrected = A.plus[restime.minus[reqtime]] | 
-				let initial = apparent > corrected implies apparent else corrected | 
-					SMaxage.time.minus[initial.plus[current.minus[restime]]] > 0
-	
+		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, SMaxage.time, restime, reqtime, current] > 0
+
 	#stored>0 and #(HTTPResponse -> Maxage)>0 and #(HTTPResponse -> SMaxage)=0 implies	//for Maxage
-		let A = HTTPResponse.headers.age, D = HTTPResponse.headers.date |
-			let apparent = restime.minus[D] > 0 implies restime.minus[D] else 0, corrected = A.plus[restime.minus[reqtime]] | 
-				let initial = apparent > corrected implies apparent else corrected | 
-					Maxage.time.minus[initial.plus[current.minus[restime]]] > 0
+		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, Maxage.time, restime, reqtime, current] > 0
 
 	#stored>0 and #(HTTPResponse -> ExpiresHeader)>0 and  #(HTTPResponse -> SMaxage)=0 and  #(HTTPResponse -> Maxage)=0 implies	//for ExpiresHeader and DateHeader
-		let A = HTTPResponse.headers.age, D = HTTPResponse.headers.date |
-			let apparent = restime.minus[D] > 0 implies restime.minus[D] else 0, corrected = A.plus[restime.minus[reqtime]] | 
-				let initial = apparent > corrected implies apparent else corrected | 
-					all e:ExpiresHeader.expire, d:DateHeader.date | e.minus[d].minus[initial.plus[current.minus[restime]]] > 0
+		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, ExpiresHeader.expire.minus[DateHeader.date], restime, reqtime, current] > 0
+}
+
+fun getExpiration[A:Int, D:Int, E:Int, restime:Int, reqtime:Int, current:Int]:Int{
+	let apparent = (restime.minus[D] > 0 implies restime.minus[D] else 0), corrected = A.plus[restime.minus[reqtime]] | 
+		let initial = (apparent > corrected implies apparent else corrected) | 
+			E.minus[initial.plus[current.minus[restime]]]
 }
 
 fact LimitHeader{
