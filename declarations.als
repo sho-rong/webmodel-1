@@ -605,12 +605,7 @@ fact LimitHeader{
 	no res:HTTPResponse, req:HTTPRequest | res.headers = req.headers
 	no resoption:ResponseCacheOption | resoption in HTTPRequest.headers.options
 	no reqoption:RequestCacheOption | reqoption in HTTPResponse.headers.options
-	lone h:CacheControlHeader | h in HTTPRequest.headers
-	lone h:CacheControlHeader | h in HTTPResponse.headers
-	one h:DateHeader | h in HTTPRequest.headers
-	one h:DateHeader | h in HTTPResponse.headers
-	lone h:ExpiresHeader | h in HTTPRequest.headers
-	lone h:ExpiresHeader | h in HTTPResponse.headers
-	lone h:AgeHeader | h in HTTPRequest.headers
-	lone h:AgeHeader | h in HTTPResponse.headers
+	all res:HTTPResponse | some h:DateHeader | res in Cache.stored and h in res.headers
+	all res:HTTPResponse | some h:ExpiresHeader | res in Cache.stored and h in res.headers
+	all res:HTTPResponse | some h:AgeHeader | res in Cache.stored and h in res.headers
 }
