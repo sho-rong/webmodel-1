@@ -66,7 +66,6 @@ pred happensBeforeOrdering[first:Event,second:Event]{
 	second.pre in first.post.*next
 }
 
-// shorter name
 pred happensBefore[first:Event,second:Event]{
 	second.pre in first.post.*next
 }
@@ -163,7 +162,7 @@ sig ScriptContext {
 
 lone sig c301,c302,c303,c304,c305,c306,c307 extends RedirectionStatus {}
 lone sig c200,c401 extends Status{}
-sig location extends HTTPResponseHeader {targetOrigin : Origin, targetPath : Path}
+//sig location extends HTTPResponseHeader {targetOrigin : Origin, targetPath : Path}
 // The name location above easily conflicts with other attributes and variables with the same name. 
 // We should follow the convention of starting type names with a capital letter.
 // Address this in later clean-up.
