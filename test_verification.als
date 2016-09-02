@@ -1,68 +1,162 @@
-//
-//	declarrations.als (exisiting)
-//
+open util/ordering[Time]
+
+abstract sig Principal {
+	servers : set NetworkEndpoint,
+}
+
+//異なるプリンシパルは同じDNS、同じサーバを持たない
+fact DNSIsDisjointAmongstPrincipals {
+	all disj p1,p2 : Principal | no (p1.servers & p2.servers) 
+}
+
+sig Time {}
+abstract sig Token {}
+
+pred happensBeforeOrdering[first:Event,second:Event]{
+	second.pre in first.post.*next
+}
+
+fact Traces{
+	all t:Time- last | one e:Event | e.pre=t and e.post=t.next
+	all e:Event | e.post=e.pre.next
+}
+
+sig NetworkEndpoint{}
+
+abstract sig Event {pre,post : Time} { }
+
+abstract sig NetworkEvent extends Event {
+    from: NetworkEndpoint,
+    to: NetworkEndpoint
+}
+
+abstract sig HTTPConformist extends NetworkEndpoint{}
+sig HTTPServer extends HTTPConformist{}
+abstract sig HTTPClient extends HTTPConformist{ 
+  owner:WebPrincipal // owner of the HTTPClient process
+}
+sig Browser extends HTTPClient {}
 
 abstract sig HTTPHeader {}
-abstract sig HTTPResponseHeader extends HTTPHeader{}{
-	all h:this | h in HTTPResponse.headers
-}
-abstract sig HTTPRequestHeader extends HTTPHeader{}{
-	all h:this | h in HTTPRequest.headers
-}
+abstract sig HTTPResponseHeader extends HTTPHeader{} 
+abstract sig HTTPRequestHeader extends HTTPHeader{}
 abstract sig HTTPGeneralHeader extends HTTPHeader{}
 abstract sig HTTPEntityHeader extends HTTPHeader{}
-
-abstract sig HTTPEvent{headers: set HTTPHeader}
-lone sig HTTPResponse extends HTTPEvent {statusCode : Status}
-one sig HTTPRequest extends HTTPEvent{}
-abstract sig Status{}{all s:Status | s in HTTPResponse.statusCode}
+abstract sig Status  {}
 abstract sig RedirectionStatus extends Status {}
-lone sig c304 extends RedirectionStatus {}
-lone sig c200 extends Status{}
 
-//
-//	cache.als
-//
-abstract sig CacheOption{}
-abstract sig RequestCacheOption extends CacheOption{}
-abstract sig ResponseCacheOption extends CacheOption{}
-/*
-lone sig NoCache,NoStore,NoTransform extends CacheOption{}
-lone sig OnlyIfCached extends RequestCacheOption{}
-lone sig MaxStale,MinStale extends RequestCacheOption{time: one Int}
-lone sig MustRevalidate,Public,Private,ProxyRevalidate extends ResponseCacheOption{}
-lone sig Maxage,SMaxage extends ResponseCacheOption{time: one Int}
-*/
+fact noOrphanedHeaders {
+	all h:HTTPRequestHeader|some req:HTTPRequest|h in req.headers
+	all h:HTTPResponseHeader|some resp:HTTPResponse|h in resp.headers
+	all h:HTTPGeneralHeader|some req:HTTPRequest, resp:HTTPResponse|h in req.headers or h in resp.headers
+	all h:HTTPEntityHeader|some req:HTTPRequest, resp:HTTPResponse|h in req.headers or h in resp.headers
+}
 
-lone sig NoCache extends CacheOption{}
-lone sig OnlyIfCached extends RequestCacheOption{}
-lone sig MaxStale extends RequestCacheOption{time: one Int}{time > 0}
-lone sig Private extends ResponseCacheOption{}
-lone sig Maxage,SMaxage extends ResponseCacheOption{time: one Int}{time > 0}
+abstract sig HTTPEvent extends NetworkEvent {
+	headers: set HTTPHeader,
+	host : Origin
+}
 
+sig HTTPRequest extends HTTPEvent { 
+	body :  set Token
+}
+
+sig HTTPResponse extends HTTPEvent {
+	statusCode : Status
+}
+
+lone sig c301,c302,c303,c304,c305,c306,c307 extends RedirectionStatus {}
+lone sig c200,c401 extends Status{}
+
+sig HTTPTransaction {
+	req : HTTPRequest,
+	resp : lone HTTPResponse,
+	cause : lone HTTPTransaction
+}{
+	some resp implies {
+		happensBeforeOrdering[req,resp]
+	}
+}
+
+fact CauseHappensBeforeConsequence  {
+	all t1: HTTPTransaction | some (t1.cause) implies
+	       some t0:HTTPTransaction | (t0 in t1.cause and happensBeforeOrdering[t0.resp, t1.req])
+}
+
+fun getTrans[e:HTTPEvent]:HTTPTransaction{
+	(req+resp).e
+}
+
+lone sig Alice extends WebPrincipal {}
+lone sig Mallory extends WEBATTACKER {}
+
+sig Origin {}
+
+fact HTTPTransactionsAreSane {
+	all disj t,t':HTTPTransaction | no (t.resp & t'.resp ) and no (t.req & t'.req)
+}
+
+/**************************** 
+
+HTTPServer Definitions 
+
+****************************/
+lone sig ACTIVEATTACKER extends Principal{}
+
+//Passive Principals match their http / network parts
+abstract sig PassivePrincipal extends Principal{}{
+	servers in HTTPConformist
+}
+
+lone sig PASSIVEATTACKER extends PassivePrincipal{}
+sig WebPrincipal extends PassivePrincipal {
+  httpClients : set HTTPClient
+} { httpClients.owner = this }
+
+//HTTPAdherent so that it can make requests too
+lone sig WEBATTACKER extends WebPrincipal{}
+
+abstract sig NormalPrincipal extends WebPrincipal{}
+lone sig GOOD extends NormalPrincipal{}
+lone sig SECURE extends NormalPrincipal{}
+lone sig ORIGINAWARE extends NormalPrincipal{}
+
+fact NormalPrincipalsDontMakeRequests {
+	no aReq:HTTPRequest | aReq.from in NormalPrincipal.servers 
+}
+
+/**************************** 
+
+Cache Definitions 
+
+****************************/
 sig PragmaHeader extends HTTPRequestHeader{}
-sig IfModifiedSinceHeader extends HTTPRequestHeader{modified: one Int}
+sig IfModifiedSinceHeader extends HTTPRequestHeader{modified: one Time}
 sig IfNoneMatchHeader extends HTTPRequestHeader{etag: one Int}
 sig ETagHeader extends HTTPResponseHeader{etag: one Int}
 sig LastModifiedHeader extends HTTPResponseHeader{modified: one Int}
-sig AgeHeader extends HTTPResponseHeader{age : one Int}
-{
-	age > 0
-	
-	/*
-	let apparent = Cache.restime.minus[HTTPResponse.headers.date]>0 implies Cache.restime.minus[HTTPResponse.headers.date] else 0 |
-		let corrected = some HTTPResponse.headers.age implies HTTPResponse.headers.age.plus[Cache.restime.minus[Cache.reqtime]] else Cache.restime.minus[Cache.reqtime] |
-			let visit = Cache.current.minus[Cache.restime] | 
-				apparent > corrected implies age = apparent.plus[visit] else age = corrected.plus[visit]
-	*/
-}
-
+sig AgeHeader extends HTTPResponseHeader{age : one Int}{age > 0}
 sig CacheControlHeader extends HTTPGeneralHeader{options : set CacheOption}
-sig DateHeader extends HTTPGeneralHeader{date : one Int}{date > 0}
-sig ExpiresHeader extends HTTPGeneralHeader{expire : one Int}{expire > 0}
+sig DateHeader extends HTTPGeneralHeader{date: one Int}{date > 0}
+sig ConnectionHeader extends HTTPGeneralHeader{next: one HTTPConformist}
+sig WarningHeader extends HTTPGeneralHeader{}
+sig ExpiresHeader extends HTTPEntityHeader{expire: one Int}{expire > 0}
 
-lone abstract sig Cache{
-	stored: lone HTTPResponse,
+abstract sig CacheOption{}
+abstract sig RequestCacheOption extends CacheOption{}
+abstract sig ResponseCacheOption extends CacheOption{}
+sig NoCache,NoStore,NoTransform extends CacheOption{}
+sig OnlyIfCached extends RequestCacheOption{}
+sig MaxStale,MinStale extends RequestCacheOption{time: one Int}
+sig MustRevalidate,Public,Private,ProxyRevalidate extends ResponseCacheOption{}
+sig Maxage,SMaxage extends ResponseCacheOption{time: one Int}
+
+abstract sig HTTPIntermediary extends HTTPConformist{}
+sig HTTPProxy extends HTTPIntermediary{}
+sig HTTPGateway extends HTTPIntermediary{}
+
+abstract sig Cache{
+	stored: set HTTPResponse,
 	current: one Int,
 	reqtime: one Int,
 	restime: one Int
@@ -70,23 +164,22 @@ lone abstract sig Cache{
 	current > 0
 	reqtime > 0
 	restime > 0
-	reqtime < restime
-	restime < current
-	
+	#stored  = 1 implies current > restime and restime > reqtime
+
 	#stored>0 implies no NoStore	//for NoStore
 	#stored>0 implies #AgeHeader>0
 }
 
 sig PrivateCache extends Cache{}{
 	#stored>0 implies	//for expiration date
-		(some op:Maxage | op in HTTPResponse.headers.options) or 
-		(some d:DateHeader, e:ExpiresHeader | d in HTTPResponse.headers and e in HTTPResponse.headers)
+		(one op:Maxage | op in HTTPResponse.headers.options) or 
+		(one d:DateHeader, e:ExpiresHeader | d in HTTPResponse.headers and e in HTTPResponse.headers)
 
 	#stored>0 and #(HTTPResponse -> Maxage)>0 implies	//for Maxage
-		all n:Maxage.time | n > current.minus[restime]
+		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, Maxage.time, restime, reqtime, current] > 0
 
-	#stored>0 and #(HTTPResponse -> ExpiresHeader)>0 implies	//for ExpiresHeader and DateHeader
-		all e:ExpiresHeader.expire, d:DateHeader.date | e.minus[d] > current.minus[restime]
+	#stored>0 and #(HTTPResponse -> ExpiresHeader)>0 and #(HTTPResponse -> Maxage)=0 implies	//for ExpiresHeader and DateHeader
+		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, ExpiresHeader.expire.minus[DateHeader.date], restime, reqtime, current] > 0
 }
 
 sig PublicCache extends Cache{}{
@@ -98,13 +191,19 @@ sig PublicCache extends Cache{}{
 		(some d:DateHeader, e:ExpiresHeader | d in HTTPResponse.headers and e in HTTPResponse.headers)
 	
 	#stored>0 and #(HTTPResponse -> SMaxage)>0 implies	//for SMaxage
-		all n:SMaxage.time | n > current.minus[restime]
-	
-	#stored>0 and #(HTTPResponse -> Maxage)>0 implies	//for Maxage
-		all n:Maxage.time | n > current.minus[restime]
+		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, SMaxage.time, restime, reqtime, current] > 0
 
-	#stored>0 and #(HTTPResponse -> ExpiresHeader)>0 implies	//for ExpiresHeader and DateHeader
-		all e:ExpiresHeader.expire, d:DateHeader.date | e.minus[d] > current.minus[restime]
+	#stored>0 and #(HTTPResponse -> Maxage)>0 and #(HTTPResponse -> SMaxage)=0 implies	//for Maxage
+		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, Maxage.time, restime, reqtime, current] > 0
+
+	#stored>0 and #(HTTPResponse -> ExpiresHeader)>0 and  #(HTTPResponse -> SMaxage)=0 and  #(HTTPResponse -> Maxage)=0 implies	//for ExpiresHeader and DateHeader
+		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, ExpiresHeader.expire.minus[DateHeader.date], restime, reqtime, current] > 0
+}
+
+fun getExpiration[A:Int, D:Int, E:Int, restime:Int, reqtime:Int, current:Int]:Int{	// calculate expiration date
+	let apparent = (restime.minus[D] > 0 implies restime.minus[D] else 0), corrected = A.plus[restime.minus[reqtime]] | 
+		let initial = (apparent > corrected implies apparent else corrected) | 
+			E.minus[initial.plus[current.minus[restime]]]
 }
 
 fact LimitHeader{
@@ -113,30 +212,9 @@ fact LimitHeader{
 	no res:HTTPResponse, req:HTTPRequest | res.headers = req.headers
 	no resoption:ResponseCacheOption | resoption in HTTPRequest.headers.options
 	no reqoption:RequestCacheOption | reqoption in HTTPResponse.headers.options
-	lone h:CacheControlHeader | h in HTTPRequest.headers
-	lone h:CacheControlHeader | h in HTTPResponse.headers
-	one h:DateHeader | h in HTTPRequest.headers
-	one h:DateHeader | h in HTTPResponse.headers
-	lone h:ExpiresHeader | h in HTTPRequest.headers
-	lone h:ExpiresHeader | h in HTTPResponse.headers
-	lone h:AgeHeader | h in HTTPRequest.headers
-	lone h:AgeHeader | h in HTTPResponse.headers
+	all res:HTTPResponse | some h:DateHeader | res in Cache.stored and h in res.headers
+	all res:HTTPResponse | some h:ExpiresHeader | res in Cache.stored and h in res.headers
+	all res:HTTPResponse | some h:AgeHeader | res in Cache.stored and h in res.headers
 }
 
-pred show(){
-	/*
-	#NoTransform = 0
-	#OnlyIfCached = 0
-	#MaxStale = 0
-	#MinStale = 0
-	#MustRevalidate = 0
-	#Public = 0
-	#ProxyRevalidate = 0
-	#SMaxage = 0
-	*/
-	
-	#PrivateCache.stored = 1
-	#Maxage = 0
-}
-
-run show for 5
+run show{} for 4
