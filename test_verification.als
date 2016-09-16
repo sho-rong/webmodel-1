@@ -17,7 +17,7 @@ pred happensBeforeOrdering[first:Event,second:Event]{
 }
 
 fact Traces{
-	all t:Time- last | one e:Event | e.pre=t and e.post=t.next
+	all t:Time-last | one e:Event | e.pre=t and e.post=t.next
 	all e:Event | e.post=e.pre.next
 }
 
@@ -172,11 +172,14 @@ abstract sig Cache{
 
 sig PrivateCache extends Cache{}{
 	#stored>0 implies	//for expiration date
-		(one op:Maxage | op in HTTPResponse.headers.options) or 
-		(one d:DateHeader, e:ExpiresHeader | d in HTTPResponse.headers and e in HTTPResponse.headers)
+		all res:HTTPResponse | 
+			res in stored implies
+				(one op:Maxage | op in res.headers.options) or 
+				(one d:DateHeader, e:ExpiresHeader | d in res.headers and e in HTTPResponse.headers)
 
 	#stored>0 and #(HTTPResponse -> Maxage)>0 implies	//for Maxage
 		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, Maxage.time, restime, reqtime, current] > 0
+		
 
 	#stored>0 and #(HTTPResponse -> ExpiresHeader)>0 and #(HTTPResponse -> Maxage)=0 implies	//for ExpiresHeader and DateHeader
 		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, ExpiresHeader.expire.minus[DateHeader.date], restime, reqtime, current] > 0
@@ -186,9 +189,11 @@ sig PublicCache extends Cache{}{
 	#stored>0 implies no Private	//for Private
 	
 	#stored>0 implies	//for expiration date
-		(some op:SMaxage | op in HTTPResponse.headers.options) or
-		(some op:Maxage | op in HTTPResponse.headers.options) or
-		(some d:DateHeader, e:ExpiresHeader | d in HTTPResponse.headers and e in HTTPResponse.headers)
+		all res:HTTPResponse | 
+			res in stored implies
+				(some op:SMaxage | op in HTTPResponse.headers.options) or
+				(some op:Maxage | op in HTTPResponse.headers.options) or
+				(some d:DateHeader, e:ExpiresHeader | d in HTTPResponse.headers and e in HTTPResponse.headers)
 	
 	#stored>0 and #(HTTPResponse -> SMaxage)>0 implies	//for SMaxage
 		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, SMaxage.time, restime, reqtime, current] > 0
@@ -200,7 +205,7 @@ sig PublicCache extends Cache{}{
 		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, ExpiresHeader.expire.minus[DateHeader.date], restime, reqtime, current] > 0
 }
 
-fun getExpiration[A:Int, D:Int, E:Int, restime:Int, reqtime:Int, current:Int]:Int{	// calculate expiration date
+fun getExpiration[A:Int, D:Int, E:Int, restime:Int, reqtime:Int, current:Int]:Int{	//calculate expiration date
 	let apparent = (restime.minus[D] > 0 implies restime.minus[D] else 0), corrected = A.plus[restime.minus[reqtime]] | 
 		let initial = (apparent > corrected implies apparent else corrected) | 
 			E.minus[initial.plus[current.minus[restime]]]
@@ -217,4 +222,28 @@ fact LimitHeader{
 	all res:HTTPResponse | some h:AgeHeader | res in Cache.stored and h in res.headers
 }
 
-run show{} for 4
+run show{
+	#PublicCache = 0
+	#PrivateCache = 1
+	#Cache.stored = 1
+	#PragmaHeader = 0
+	#ConnectionHeader = 0
+	#WarningHeader = 0
+} for 4
+
+/*
+fun validation[res:HTTPResponse]{
+	(res.headers and ETagHeader) in ETagHeader implies 
+}
+
+fact validationEtag{
+	//all res:HTTPRequest |
+		//res.headers and ETagHeader 
+	
+	//second in first.next
+}
+
+fact validationModifiedDate{
+	//second in first.next
+}
+*/
