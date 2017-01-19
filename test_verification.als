@@ -6,7 +6,7 @@ abstract sig Principal {
 
 //異なるプリンシパルは同じDNS、同じサーバを持たない
 fact DNSIsDisjointAmongstPrincipals {
-	all disj p1,p2 : Principal | no (p1.servers & p2.servers) 
+	all disj p1,p2 : Principal | no (p1.servers & p2.servers)
 }
 
 sig Time {}
@@ -23,7 +23,7 @@ fact Traces{
 
 sig NetworkEndpoint{}
 
-abstract sig Event {pre,post : Time} { }
+abstract sig Event {pre,post : Time}
 
 abstract sig NetworkEvent extends Event {
     from: NetworkEndpoint,
@@ -32,13 +32,13 @@ abstract sig NetworkEvent extends Event {
 
 abstract sig HTTPConformist extends NetworkEndpoint{}
 sig HTTPServer extends HTTPConformist{}
-abstract sig HTTPClient extends HTTPConformist{ 
+abstract sig HTTPClient extends HTTPConformist{
   owner:WebPrincipal // owner of the HTTPClient process
 }
 sig Browser extends HTTPClient {}
 
 abstract sig HTTPHeader {}
-abstract sig HTTPResponseHeader extends HTTPHeader{} 
+abstract sig HTTPResponseHeader extends HTTPHeader{}
 abstract sig HTTPRequestHeader extends HTTPHeader{}
 abstract sig HTTPGeneralHeader extends HTTPHeader{}
 abstract sig HTTPEntityHeader extends HTTPHeader{}
@@ -54,10 +54,11 @@ fact noOrphanedHeaders {
 
 abstract sig HTTPEvent extends NetworkEvent {
 	headers: set HTTPHeader,
-	host : Origin
+	host : Origin,
+	uri : one Token
 }
 
-sig HTTPRequest extends HTTPEvent { 
+sig HTTPRequest extends HTTPEvent {
 	body :  set Token
 }
 
@@ -96,9 +97,9 @@ fact HTTPTransactionsAreSane {
 	all disj t,t':HTTPTransaction | no (t.resp & t'.resp ) and no (t.req & t'.req)
 }
 
-/**************************** 
+/****************************
 
-HTTPServer Definitions 
+HTTPServer Definitions
 
 ****************************/
 lone sig ACTIVEATTACKER extends Principal{}
@@ -122,12 +123,12 @@ lone sig SECURE extends NormalPrincipal{}
 lone sig ORIGINAWARE extends NormalPrincipal{}
 
 fact NormalPrincipalsDontMakeRequests {
-	no aReq:HTTPRequest | aReq.from in NormalPrincipal.servers 
+	no aReq:HTTPRequest | aReq.from in NormalPrincipal.servers
 }
 
-/**************************** 
+/****************************
 
-Cache Definitions 
+Cache Definitions
 
 ****************************/
 sig PragmaHeader extends HTTPRequestHeader{}
@@ -137,7 +138,10 @@ sig ETagHeader extends HTTPResponseHeader{etag: one Int}
 sig LastModifiedHeader extends HTTPResponseHeader{modified: one Int}
 sig AgeHeader extends HTTPResponseHeader{age : one Int}{age > 0}
 sig CacheControlHeader extends HTTPGeneralHeader{options : set CacheOption}
-sig DateHeader extends HTTPGeneralHeader{date: one Int}{date > 0}
+sig DateHeader extends HTTPGeneralHeader{date: one Int}{
+	//date > 0
+	//all t:Time, e1:HTTPEvent, e2:HTTPEvent | e1. implies
+}
 sig ConnectionHeader extends HTTPGeneralHeader{next: one HTTPConformist}
 sig WarningHeader extends HTTPGeneralHeader{}
 sig ExpiresHeader extends HTTPEntityHeader{expire: one Int}{expire > 0}
@@ -172,14 +176,14 @@ abstract sig Cache{
 
 sig PrivateCache extends Cache{}{
 	#stored>0 implies	//for expiration date
-		all res:HTTPResponse | 
+		all res:HTTPResponse |
 			res in stored implies
-				(one op:Maxage | op in res.headers.options) or 
+				(one op:Maxage | op in res.headers.options) or
 				(one d:DateHeader, e:ExpiresHeader | d in res.headers and e in HTTPResponse.headers)
 
 	#stored>0 and #(HTTPResponse -> Maxage)>0 implies	//for Maxage
 		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, Maxage.time, restime, reqtime, current] > 0
-		
+
 
 	#stored>0 and #(HTTPResponse -> ExpiresHeader)>0 and #(HTTPResponse -> Maxage)=0 implies	//for ExpiresHeader and DateHeader
 		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, ExpiresHeader.expire.minus[DateHeader.date], restime, reqtime, current] > 0
@@ -187,14 +191,14 @@ sig PrivateCache extends Cache{}{
 
 sig PublicCache extends Cache{}{
 	#stored>0 implies no Private	//for Private
-	
+
 	#stored>0 implies	//for expiration date
-		all res:HTTPResponse | 
+		all res:HTTPResponse |
 			res in stored implies
 				(some op:SMaxage | op in HTTPResponse.headers.options) or
 				(some op:Maxage | op in HTTPResponse.headers.options) or
 				(some d:DateHeader, e:ExpiresHeader | d in HTTPResponse.headers and e in HTTPResponse.headers)
-	
+
 	#stored>0 and #(HTTPResponse -> SMaxage)>0 implies	//for SMaxage
 		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, SMaxage.time, restime, reqtime, current] > 0
 
@@ -206,8 +210,8 @@ sig PublicCache extends Cache{}{
 }
 
 fun getExpiration[A:Int, D:Int, E:Int, restime:Int, reqtime:Int, current:Int]:Int{	//calculate expiration date
-	let apparent = (restime.minus[D] > 0 implies restime.minus[D] else 0), corrected = A.plus[restime.minus[reqtime]] | 
-		let initial = (apparent > corrected implies apparent else corrected) | 
+	let apparent = (restime.minus[D] > 0 implies restime.minus[D] else 0), corrected = A.plus[restime.minus[reqtime]] |
+		let initial = (apparent > corrected implies apparent else corrected) |
 			E.minus[initial.plus[current.minus[restime]]]
 }
 
@@ -233,13 +237,14 @@ run show{
 
 /*
 fun validation[res:HTTPResponse]{
-	(res.headers and ETagHeader) in ETagHeader implies 
+	(res.headers and ETagHeader) in ETagHeader implies
+		res.headers.etag =
 }
 
 fact validationEtag{
 	//all res:HTTPRequest |
-		//res.headers and ETagHeader 
-	
+		//res.headers and ETagHeader
+
 	//second in first.next
 }
 
