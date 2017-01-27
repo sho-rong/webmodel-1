@@ -2,9 +2,21 @@ open util/ordering[Time]
 
 sig Token{}
 sig Time{}
-abstract sig Event {pre,post : Time}
-sig HTTPRequest extends Event{}
-sig HTTPResponse extends Event{}
 
+fact Traces{
+	all t:Time | one e:Event | t = e.current
+}
 
-run show{} for 5 Time
+abstract sig Event {current : Time}
+abstract sig HTTPEvent extends Event {uri : one Token}
+sig HTTPRequest extends HTTPEvent{}
+sig HTTPResponse extends HTTPEvent{}
+
+fact ReqToRes{
+	all req:HTTPRequest | some res:HTTPResponse | req.uri = res.uri and res.current in req.current.*next
+	all res:HTTPResponse | some req:HTTPRequest | req.uri = res.uri and req.current in (Time - res.current.*next)
+}
+
+run {
+	#HTTPRequest = 1
+}
