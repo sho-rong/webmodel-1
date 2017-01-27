@@ -10,20 +10,19 @@ fact DNSIsDisjointAmongstPrincipals {
 }
 
 sig Time {}
-abstract sig Token {}
+sig Token {}
 
 pred happensBeforeOrdering[first:Event,second:Event]{
-	second.pre in first.post.*next
+	second.current in first.current.*next
 }
 
 fact Traces{
-	all t:Time-last | one e:Event | e.pre=t and e.post=t.next
-	all e:Event | e.post=e.pre.next
+	all t:Time | one e:Event | t = e.current
 }
 
 sig NetworkEndpoint{}
 
-abstract sig Event {pre,post : Time}
+abstract sig Event {current : Time}
 
 abstract sig NetworkEvent extends Event {
     from: NetworkEndpoint,
@@ -64,6 +63,11 @@ sig HTTPRequest extends HTTPEvent {
 
 sig HTTPResponse extends HTTPEvent {
 	statusCode : Status
+}
+
+fact ReqToRes{
+	all req:HTTPRequest | some res:HTTPResponse | req.uri = res.uri and res.current in req.current.*next
+	all res:HTTPResponse | some req:HTTPRequest | req.uri = res.uri and req.current in (Time - res.current.*next)
 }
 
 lone sig c301,c302,c303,c304,c305,c306,c307 extends RedirectionStatus {}
@@ -237,7 +241,7 @@ run show{
 
 /*
 fun validation[res:HTTPResponse]{
-	(res.headers and ETagHeader) in ETagHeader implies
+	res.headers and ETagHeader implies
 		res.headers.etag =
 }
 
