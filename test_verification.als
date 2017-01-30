@@ -179,6 +179,7 @@ abstract sig Cache{
 }
 
 sig PrivateCache extends Cache{}{
+	/*
 	#stored>0 implies	//for expiration date
 		all res:HTTPResponse |
 			res in stored implies
@@ -191,6 +192,7 @@ sig PrivateCache extends Cache{}{
 
 	#stored>0 and #(HTTPResponse -> ExpiresHeader)>0 and #(HTTPResponse -> Maxage)=0 implies	//for ExpiresHeader and DateHeader
 		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, ExpiresHeader.expire.minus[DateHeader.date], restime, reqtime, current] > 0
+	*/
 }
 
 sig PublicCache extends Cache{}{
@@ -203,6 +205,7 @@ sig PublicCache extends Cache{}{
 				(some op:Maxage | op in HTTPResponse.headers.options) or
 				(some d:DateHeader, e:ExpiresHeader | d in HTTPResponse.headers and e in HTTPResponse.headers)
 
+	/*
 	#stored>0 and #(HTTPResponse -> SMaxage)>0 implies	//for SMaxage
 		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, SMaxage.time, restime, reqtime, current] > 0
 
@@ -211,6 +214,7 @@ sig PublicCache extends Cache{}{
 
 	#stored>0 and #(HTTPResponse -> ExpiresHeader)>0 and  #(HTTPResponse -> SMaxage)=0 and  #(HTTPResponse -> Maxage)=0 implies	//for ExpiresHeader and DateHeader
 		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, ExpiresHeader.expire.minus[DateHeader.date], restime, reqtime, current] > 0
+	*/
 }
 
 fun getExpiration[A:Int, D:Int, E:Int, restime:Int, reqtime:Int, current:Int]:Int{	//calculate expiration date
@@ -240,19 +244,17 @@ run show{
 } for 4
 
 /*
-fun validation[res:HTTPResponse]{
-	res.headers and ETagHeader implies
-		res.headers.etag =
-}
-
-fact validationEtag{
-	//all res:HTTPRequest |
-		//res.headers and ETagHeader
-
-	//second in first.next
-}
-
-fact validationModifiedDate{
-	//second in first.next
+fact validation[res:HTTPResponse]{
+	{
+		res.headers and ETagHeader implies
+			//make conditional request
+			one req:HTTPRequest |
+				{
+					req.current in res.current.*next
+					req.uri = res.uri
+					req.headers and IfNoneMatchHeader
+					req.etag = res.etag
+				}
+	}
 }
 */
