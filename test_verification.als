@@ -197,7 +197,7 @@ sig PrivateCache extends Cache{}{
 sig PublicCache extends Cache{}{
 	no res:HTTPResponse |
 		res in stored implies
-			no h:CacheControlHeader | h in res.headers and Private in h.options
+			no h:CacheControlHeader | h in res.headers and (Private and h.options)
 
 	all res:HTTPResponse |
 		res in stored implies
@@ -222,13 +222,22 @@ fact reuseCache{
 		some res:HTTPResponse |
 			res.uri = req.uri and res in PublicCache.stored implies
 				one reuse_res:HTTPResponse |
-					{
-						copyResponse[reuse_res, res]
-						reuse_res.current in res.current.*next
-					}
+					(one h:CacheControlHeader | h in res.headers and (SMaxage and h.options)) or
+					(one h:CacheControlHeader | h in res.headers and (Maxage and h.options) and (not SMaxage in h.options)) or
+					(res.headers and (no h:CacheControlHeader | h in res.headers and (Maxage and h.options) and (SMaxage in h.options))) implies
+						{
+							copyResponse[reuse_res, res]
+							reuse_res.current in res.current.*next
+						}
 }
 
 pred copyResponse[tar:HTTPResponse, res:HTTPResponse]{
+	/*
+
+	*/
+}
+
+pred validationResponse[tar:HTTPResponse]{
 	/*
 
 	*/
