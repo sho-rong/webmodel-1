@@ -217,6 +217,23 @@ sig PublicCache extends Cache{}{
 	*/
 }
 
+fact reuseCache{
+	all req:HTTPRequest |
+		some res:HTTPResponse |
+			res.uri = req.uri and res in PublicCache.stored implies
+				one reuse_res:HTTPResponse |
+					{
+						copyResponse[reuse_res, res]
+						reuse_res.current in res.current.*next
+					}
+}
+
+pred copyResponse[tar:HTTPResponse, res:HTTPResponse]{
+	/*
+
+	*/
+}
+
 fun getExpiration[A:Int, D:Int, E:Int, restime:Int, reqtime:Int, current:Int]:Int{	//calculate expiration date
 	let apparent = (restime.minus[D] > 0 implies restime.minus[D] else 0), corrected = A.plus[restime.minus[reqtime]] |
 		let initial = (apparent > corrected implies apparent else corrected) |
