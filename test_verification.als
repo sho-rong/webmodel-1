@@ -179,13 +179,12 @@ abstract sig Cache{
 }
 
 sig PrivateCache extends Cache{}{
-	/*
-	#stored>0 implies	//for expiration date
-		all res:HTTPResponse |
-			res in stored implies
-				(one op:Maxage | op in res.headers.options) or
-				(one d:DateHeader, e:ExpiresHeader | d in res.headers and e in HTTPResponse.headers)
+	all res:HTTPResponse |
+		res in stored implies
+			(some op:Maxage | op in HTTPResponse.headers.options) or
+			(some d:DateHeader, e:ExpiresHeader | d in HTTPResponse.headers and e in HTTPResponse.headers)
 
+	/*
 	#stored>0 and #(HTTPResponse -> Maxage)>0 implies	//for Maxage
 		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, Maxage.time, restime, reqtime, current] > 0
 
@@ -200,14 +199,11 @@ sig PublicCache extends Cache{}{
 		res in stored implies
 			no h:CacheControlHeader | h in res.headers and Private in h.options
 
-	/*
-	#stored>0 implies	//for expiration date
-		all res:HTTPResponse |
-			res in stored implies
-				(some op:SMaxage | op in HTTPResponse.headers.options) or
-				(some op:Maxage | op in HTTPResponse.headers.options) or
-				(some d:DateHeader, e:ExpiresHeader | d in HTTPResponse.headers and e in HTTPResponse.headers)
-	*/
+	all res:HTTPResponse |
+		res in stored implies
+			(some op:SMaxage | op in HTTPResponse.headers.options) or
+			(some op:Maxage | op in HTTPResponse.headers.options) or
+			(some d:DateHeader, e:ExpiresHeader | d in HTTPResponse.headers and e in HTTPResponse.headers)
 
 	/*
 	#stored>0 and #(HTTPResponse -> SMaxage)>0 implies	//for SMaxage
