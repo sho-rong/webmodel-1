@@ -197,7 +197,7 @@ sig PrivateCache extends Cache{}{
 sig PublicCache extends Cache{}{
 	no res:HTTPResponse |
 		res in stored implies
-			no h:CacheControlHeader | h in res.headers and (Private and h.options)
+			no h:CacheControlHeader | h in res.headers and (Private in h.options)
 
 	all res:HTTPResponse |
 		res in stored implies
@@ -222,13 +222,12 @@ fact reuseCache{
 		some res:HTTPResponse |
 			res.uri = req.uri and res in PublicCache.stored implies
 				one reuse_res:HTTPResponse |
-					(one h:CacheControlHeader | h in res.headers and (SMaxage and h.options)) or
-					(one h:CacheControlHeader | h in res.headers and (Maxage and h.options) and (not SMaxage in h.options)) or
-					(res.headers and (no h:CacheControlHeader | h in res.headers and (Maxage and h.options) and (SMaxage in h.options))) implies
-						{
-							copyResponse[reuse_res, res]
-							reuse_res.current in res.current.*next
-						}
+					(one h:CacheControlHeader | h in res.headers and (Maxage in h.options) and (SMaxage in h.options)) or (ExpiresHeader in res.headers) implies
+						checkExpiration[res] implies
+							{
+								copyResponse[reuse_res, res]
+								reuse_res.current in res.current.*next
+							}
 }
 
 pred copyResponse[tar:HTTPResponse, res:HTTPResponse]{
@@ -243,11 +242,19 @@ pred validationResponse[tar:HTTPResponse]{
 	*/
 }
 
+pred checkExpiration[res:HTTPResponse]{
+	/*
+
+	*/
+}
+
+/*
 fun getExpiration[A:Int, D:Int, E:Int, restime:Int, reqtime:Int, current:Int]:Int{	//calculate expiration date
 	let apparent = (restime.minus[D] > 0 implies restime.minus[D] else 0), corrected = A.plus[restime.minus[reqtime]] |
 		let initial = (apparent > corrected implies apparent else corrected) |
 			E.minus[initial.plus[current.minus[restime]]]
 }
+*/
 
 fact LimitHeader{
 	all h:HTTPHeader | h in HTTPResponse.headers or h in HTTPRequest.headers
