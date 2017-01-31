@@ -30,11 +30,11 @@ abstract sig NetworkEvent extends Event {
 }
 
 abstract sig HTTPConformist extends NetworkEndpoint{}
-sig HTTPServer extends HTTPConformist{}
+sig HTTPServer extends HTTPConformist{cache : lone PublicCache}
 abstract sig HTTPClient extends HTTPConformist{
   owner:WebPrincipal // owner of the HTTPClient process
 }
-sig Browser extends HTTPClient {}
+sig Browser extends HTTPClient {cache : lone PrivateCache}
 
 abstract sig HTTPHeader {}
 abstract sig HTTPResponseHeader extends HTTPHeader{}
@@ -215,6 +215,11 @@ sig PublicCache extends Cache{}{
 	#stored>0 and #(HTTPResponse -> ExpiresHeader)>0 and  #(HTTPResponse -> SMaxage)=0 and  #(HTTPResponse -> Maxage)=0 implies	//for ExpiresHeader and DateHeader
 		getExpiration[HTTPResponse.headers.age, HTTPResponse.headers.date, ExpiresHeader.expire.minus[DateHeader.date], restime, reqtime, current] > 0
 	*/
+}
+
+fact noOrphanedCaches {
+	all c:Cache |
+		(some b:Browser | c = b.cache) or (some s:HTTPServer | c = s.cache)
 }
 
 fact reuseCache{
