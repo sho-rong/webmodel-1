@@ -143,12 +143,22 @@ sig LastModifiedHeader extends HTTPResponseHeader{modified: one Int}
 sig AgeHeader extends HTTPResponseHeader{age : one Int}{age > 0}
 sig CacheControlHeader extends HTTPGeneralHeader{options : set CacheOption}
 sig DateHeader extends HTTPGeneralHeader{date: one Int}{
-	//date > 0
-	//all t:Time, e1:HTTPEvent, e2:HTTPEvent | e1. implies
+	date > 0
 }
 sig ConnectionHeader extends HTTPGeneralHeader{next: one HTTPConformist}
 sig WarningHeader extends HTTPGeneralHeader{}
 sig ExpiresHeader extends HTTPEntityHeader{expire: one Int}{expire > 0}
+
+fact linearDateHeader{
+	all disj e1,e2 :HTTPEvent |
+		(DateHeader in e1.headers) and (DateHeader in e2.headers) and (e1.current in e2.current.*next) implies
+			all disj d1,d2 :DateHeader |
+				{
+					d1 in e1.headers
+					d2 in e2.headers
+					d1.date > d2.date
+				}
+}
 
 abstract sig CacheOption{}
 abstract sig RequestCacheOption extends CacheOption{}
@@ -225,7 +235,7 @@ fact noOrphanedCaches {
 fact reuseCache{
 	all req:HTTPRequest |
 		some res:HTTPResponse |
-			res.uri = req.uri and res in PublicCache.stored implies
+			res.uri = req.uri and res in Cache.stored implies
 				one reuse_res:HTTPResponse |
 					(one h:CacheControlHeader | h in res.headers and (Maxage in h.options) and (SMaxage in h.options)) or (ExpiresHeader in res.headers) implies
 						checkExpiration[res] implies
