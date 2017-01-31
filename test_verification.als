@@ -228,18 +228,26 @@ fact reuseCache{
 								copyResponse[reuse_res, res]
 								reuse_res.current in res.current.*next
 							}
+						else
+							{
+								validationResponse[reuse_res] implies
+									{
+										//
+									}
+								else
+									{
+										//
+									}
+							}
 }
 
 pred copyResponse[tar:HTTPResponse, res:HTTPResponse]{
-	/*
-
-	*/
-}
-
-pred validationResponse[tar:HTTPResponse]{
-	/*
-
-	*/
+	tar.headers = res.headers
+	tar.host = res.host
+	tar.uri = res.uri
+	tar.statusCode = res.statusCode
+	tar.from = res.from
+	tar.to = res.to
 }
 
 pred checkExpiration[res:HTTPResponse]{
@@ -248,13 +256,17 @@ pred checkExpiration[res:HTTPResponse]{
 	*/
 }
 
-/*
+pred validationResponse[res:HTTPResponse]{
+	/*
+
+	*/
+}
+
 fun getExpiration[A:Int, D:Int, E:Int, restime:Int, reqtime:Int, current:Int]:Int{	//calculate expiration date
 	let apparent = (restime.minus[D] > 0 implies restime.minus[D] else 0), corrected = A.plus[restime.minus[reqtime]] |
 		let initial = (apparent > corrected implies apparent else corrected) |
 			E.minus[initial.plus[current.minus[restime]]]
 }
-*/
 
 fact LimitHeader{
 	all h:HTTPHeader | h in HTTPResponse.headers or h in HTTPRequest.headers
