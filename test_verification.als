@@ -151,7 +151,7 @@ sig ExpiresHeader extends HTTPEntityHeader{expire: one Int}{expire > 0}
 
 fact linearDateHeader{
 	all disj e1,e2 :HTTPEvent |
-		(DateHeader in e1.headers) and (DateHeader in e2.headers) and (e1.current in e2.current.*next) implies
+		(one d:DateHeader | d in e1.headers) and (one d:DateHeader | d in e2.headers) and (e1.current in e2.current.*next) implies
 			all disj d1,d2 :DateHeader |
 				{
 					d1 in e1.headers
@@ -237,7 +237,7 @@ fact reuseCache{
 		some res:HTTPResponse |
 			res.uri = req.uri and res in Cache.stored implies
 				one reuse_res:HTTPResponse |
-					(one h:CacheControlHeader | h in res.headers and (Maxage in h.options) and (SMaxage in h.options)) or (ExpiresHeader in res.headers) implies
+					(one h:CacheControlHeader | h in res.headers and (one op:Maxage | op in h.options) and (one op:SMaxage | op in h.options)) or (one e:ExpiresHeader | e in res.headers) implies
 						checkExpiration[res] implies
 							{
 								copyResponse[reuse_res, res]
