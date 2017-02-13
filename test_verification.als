@@ -254,7 +254,11 @@ sig PublicCache extends Cache{}{
 
 fact noOrphanedCaches {
 	all c:Cache |
-		(some b:Browser | c = b.cache) or (some s:HTTPServer | c = s.cache)
+		some e:NetworkEndpoint | c = e.cache
+}
+
+fact noMultipleCaches {
+	no disj e1, e2:NetworkEndpoint | e1.cache = e2.cache
 }
 
 /*
