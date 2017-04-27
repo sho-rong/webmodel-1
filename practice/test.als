@@ -21,11 +21,13 @@ fact Traces{
 
 sig NetworkEndpoint{cache : lone Cache}
 
-abstract sig Event {current : Time}
+abstract sig Event {
+	current : one Time
+}
 
 abstract sig NetworkEvent extends Event {
-    from: NetworkEndpoint,
-    to: NetworkEndpoint
+	from: NetworkEndpoint,
+	to: NetworkEndpoint
 }
 
 abstract sig HTTPHeader {}
@@ -45,8 +47,10 @@ fact noOrphanedHeaders {
 
 abstract sig HTTPEvent extends NetworkEvent {
 	headers: set HTTPHeader,
-	uri : one Token
+	uri : one Uri
 }
+
+sig Uri extends Token{}
 
 sig HTTPRequest extends HTTPEvent {}
 
@@ -62,6 +66,7 @@ fact reusePossibility{
 		else #(res.reuse)=0
 }
 
+//check pair of request and response
 fact ReqToRes{
 	all req:HTTPRequest | some res:HTTPResponse | req.uri = res.uri and res.current in req.current.*next
 	all res:HTTPResponse | some req:HTTPRequest | req.uri = res.uri and req.current in (Time - res.current.*next)
@@ -124,37 +129,23 @@ fact noMultipleCaches {
 	no disj e1, e2:NetworkEndpoint | e1.cache = e2.cache
 }
 
-/*
+//for reuse of response
 fact reuseCache{
-	all req:HTTPRequest |
-		one res:HTTPResponse |
-			(res.uri = req.uri and res in Cache.stored) implies
-				one reuse_res:HTTPResponse |
-					(one h:CacheControlHeader | h in res.headers and (one op:Maxage | op in h.options) and (one op:SMaxage | op in h.options)) or (one e:ExpiresHeader | e in res.headers) implies
-						checkExpiration[res] implies
-							{
-								copyResponse[reuse_res, res]
-								reuse_res.current in res.current.*next
-							}
-						else
-							{
-								validationResponse[reuse_res] implies
-									{
-										//
-									}
-								else
-									{
-										//
-									}
-							}
+	all res:HTTPResponse |
+		res in Cache.stored implies
+			one origin_res:HTTPResponse |
+				{
+					origin_res.reuse = OK
+					equalResponse[res, origin_res]
+					res.current in origin_res.current.*next
+				}
 }
-*/
 
-pred copyResponse[tar:HTTPResponse, res:HTTPResponse]{
-	tar.headers = res.headers
-	tar.uri = res.uri
-	tar.from = res.from
-	tar.to = res.to
+//for confirming identify of two responses
+//judge by headers
+pred equalResponse[tar:HTTPResponse, res:HTTPResponse]{
+	all h:HTTPHeader |
+			(h in tar.headers implies h in res.headers) and (h in res.headers implies h in tar.headers)
 }
 
 pred checkExpiration[res:HTTPResponse]{
@@ -170,18 +161,20 @@ pred validationResponse[res:HTTPResponse]{
 fact LimitHeader{
 	all h:HTTPHeader | h in HTTPResponse.headers or h in HTTPRequest.headers
 	all c:CacheOption | c in CacheControlHeader.options
-	//no res:HTTPResponse, req:HTTPRequest | res.headers = req.headers
-	//all resoption:ResponseCacheOption | resoption in HTTPResponse.headers.options
-	//all reqoption:RequestCacheOption | reqoption in HTTPRequest.headers.options
-	/*
-	all res:HTTPResponse | some h:DateHeader | res in Cache.stored and h in res.headers
-	all res:HTTPResponse | some h:ExpiresHeader | res in Cache.stored and h in res.headers
-	all res:HTTPResponse | some h:AgeHeader | res in Cache.stored and h in res.headers
-	*/
 }
 
-run show{
-	#Cache = 0
+run {
+	#PrivateCache = 1
+	#PublicCache = 0
+	#stored > 0
 	#HTTPResponse > 0
 	#HTTPRequest > 0
+
+	#IfModifiedSinceHeader = 0
+	#IfNoneMatchHeader = 0
+	#ETagHeader = 0
+	#LastModifiedHeader = 0
+	#AgeHeader = 0
+	#DateHeader = 0
+	#ExpiresHeader = 0
 }
