@@ -21,6 +21,7 @@ fact Traces{
 
 sig NetworkEndpoint{cache : lone Cache}
 
+//----- イベント記述 -----
 abstract sig Event {
 	current : one Time
 }
@@ -30,6 +31,26 @@ abstract sig NetworkEvent extends Event {
 	to: NetworkEndpoint
 }
 
+abstract sig HTTPEvent extends NetworkEvent {
+	headers: set HTTPHeader,
+	uri : one Uri
+}
+
+sig HTTPRequest extends HTTPEvent {}
+
+sig HTTPResponse extends HTTPEvent {
+	reuse: lone CacheStatus
+}
+
+abstract sig CacheEvent extends Event {
+	happen: one Cache
+}
+
+//----- トークン記述 -----
+sig Uri extends Token{}
+enum CacheStatus{OK, NG}
+
+//----- HTTPヘッダ記述 -----
 abstract sig HTTPHeader {}
 abstract sig HTTPResponseHeader extends HTTPHeader{}
 abstract sig HTTPRequestHeader extends HTTPHeader{}
@@ -38,27 +59,26 @@ abstract sig HTTPEntityHeader extends HTTPHeader{}
 abstract sig Status  {}
 abstract sig RedirectionStatus extends Status {}
 
+sig IfModifiedSinceHeader extends HTTPRequestHeader{}
+sig IfNoneMatchHeader extends HTTPRequestHeader{}
+sig ETagHeader extends HTTPResponseHeader{}
+sig LastModifiedHeader extends HTTPResponseHeader{}
+sig AgeHeader extends HTTPResponseHeader{}
+sig CacheControlHeader extends HTTPGeneralHeader{options : set CacheOption}
+sig DateHeader extends HTTPGeneralHeader{}
+sig ExpiresHeader extends HTTPEntityHeader{}
+
+abstract sig CacheOption{}
+abstract sig ResponseCacheOption extends CacheOption{}
+sig NoCache,NoStore,NoTransform extends CacheOption{}
+sig Maxage,SMaxage,Private,Public extends ResponseCacheOption{}
+
 fact noOrphanedHeaders {
 	all h:HTTPRequestHeader|some req:HTTPRequest|h in req.headers
 	all h:HTTPResponseHeader|some resp:HTTPResponse|h in resp.headers
 	all h:HTTPGeneralHeader|some req:HTTPRequest, resp:HTTPResponse|h in req.headers or h in resp.headers
 	all h:HTTPEntityHeader|some req:HTTPRequest, resp:HTTPResponse|h in req.headers or h in resp.headers
 }
-
-abstract sig HTTPEvent extends NetworkEvent {
-	headers: set HTTPHeader,
-	uri : one Uri
-}
-
-sig Uri extends Token{}
-
-sig HTTPRequest extends HTTPEvent {}
-
-sig HTTPResponse extends HTTPEvent {
-	reuse: lone CacheStatus
-}
-
-enum CacheStatus{OK, NG}
 
 fact reusePossibility{
 	all res:HTTPResponse |
@@ -77,20 +97,6 @@ fact ReqToRes{
 Cache Definitions
 
 ****************************/
-sig IfModifiedSinceHeader extends HTTPRequestHeader{}
-sig IfNoneMatchHeader extends HTTPRequestHeader{}
-sig ETagHeader extends HTTPResponseHeader{}
-sig LastModifiedHeader extends HTTPResponseHeader{}
-sig AgeHeader extends HTTPResponseHeader{}
-sig CacheControlHeader extends HTTPGeneralHeader{options : set CacheOption}
-sig DateHeader extends HTTPGeneralHeader{}
-sig ExpiresHeader extends HTTPEntityHeader{}
-
-abstract sig CacheOption{}
-abstract sig ResponseCacheOption extends CacheOption{}
-sig NoCache,NoStore,NoTransform extends CacheOption{}
-sig Maxage,SMaxage,Private,Public extends ResponseCacheOption{}
-
 abstract sig Cache{
 	stored: set HTTPResponse,
 }{
