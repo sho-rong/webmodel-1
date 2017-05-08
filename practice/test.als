@@ -9,7 +9,6 @@ fact DNSIsDisjointAmongstPrincipals {
 }
 
 sig Time {}
-sig Token {}
 
 pred happensBeforeOrdering[first:Event,second:Event]{
 	second.current in first.current.*next
@@ -38,9 +37,7 @@ abstract sig HTTPEvent extends NetworkEvent {
 
 sig HTTPRequest extends HTTPEvent {}
 
-sig HTTPResponse extends HTTPEvent {
-	//reuse: lone CacheStatus
-}
+sig HTTPResponse extends HTTPEvent {}
 
 abstract sig CacheEvent extends Event {
 	happen: one Cache,
@@ -50,16 +47,36 @@ abstract sig CacheEvent extends Event {
 sig CacheStore extends CacheEvent {}
 sig CacheReuse extends CacheEvent {}
 
+//CacheStoreの発生条件
 fact HappenCacheStore{
 	all e:CacheStore | one res:HTTPResponse | {
 		e.current = res.current.next
+		e.target = res
 		e.happen = res.to.cache
 	}
 }
 
+//CacheReuseの発生条件
+fact HappenCacheReuse{
+	all reuse:CacheReuse | some store:CacheStore, req:HTTPRequest |{
+		//応答するリクエストに対する条件
+		reuse.current = req.current.next
+		reuse.target.uri = req.uri
+
+		//過去の格納イベントに対する条件
+		store.current in Time - reuse.current.*next
+		reuse.target.uri = store.target.uri
+		reuse.target = store.target
+	}
+}
+
 //----- トークン記述 -----
-sig Uri extends Token{}
-enum CacheStatus{OK, NG}
+sig Uri{}
+
+//使用されないURIは存在しない
+fact noOrphanedUri{
+	all u:Uri | some e:HTTPEvent | u = e.uri
+}
 
 //----- HTTPヘッダ記述 -----
 abstract sig HTTPHeader {}
@@ -84,17 +101,38 @@ abstract sig ResponseCacheOption extends CacheOption{}
 sig NoCache,NoStore,NoTransform extends CacheOption{}
 sig Maxage,SMaxage,Private,Public extends ResponseCacheOption{}
 
+//どのリクエスト・レスポンスにも属さないヘッダは存在しない
+//各ヘッダは適切なリクエスト・レスポンスに属する
+//どのCacheControlヘッダにも属さないCacheOptiionは存在しない
 fact noOrphanedHeaders {
 	all h:HTTPRequestHeader|some req:HTTPRequest|h in req.headers
 	all h:HTTPResponseHeader|some resp:HTTPResponse|h in resp.headers
 	all h:HTTPGeneralHeader|some req:HTTPRequest, resp:HTTPResponse|h in req.headers or h in resp.headers
 	all h:HTTPEntityHeader|some req:HTTPRequest, resp:HTTPResponse|h in req.headers or h in resp.headers
+	all c:CacheOption | c in CacheControlHeader.options
 }
 
-//check pair of request and response
+//リクエストに対する応答の動作の条件
 fact ReqToRes{
-	all req:HTTPRequest | some res:HTTPResponse | req.uri = res.uri and res.current in req.current.*next
-	all res:HTTPResponse | some req:HTTPRequest | req.uri = res.uri and req.current in (Time - res.current.*next)
+	all req:HTTPRequest | one res:HTTPResponse |
+		//レスポンスを新しく生成する場合
+		{
+			req.from = res.to
+			req.to = res.from
+			req.uri = res.uri
+
+			//レスポンスを新しく生成する場合
+			(req.current.next = res.current) or
+			//レスポンスを再利用する場合
+			(one store:CacheStore |
+				{
+					req.current.next = store.current
+					store.target = res
+				}
+			)
+		}
+
+	all res:HTTPResponse | one req:HTTPRequest | req.current.next = res.current
 }
 
 /****************************
@@ -107,67 +145,22 @@ abstract sig Cache{}
 sig PrivateCache extends Cache{}
 sig PublicCache extends Cache{}
 
-/*
-abstract sig Cache{
-	stored: set HTTPResponse,
-}{
-	all res:HTTPResponse |
-		res in stored implies {
-			no op:NoStore | op in res.headers.options
-			no h:AgeHeader | h in res.headers
-		}
-}
-
-sig PrivateCache extends Cache{}{
-	all res:HTTPResponse |
-		res in stored implies
-			((some op:Maxage | op in res.headers.options) or
-			(some d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers))
-}
-
-sig PublicCache extends Cache{}{
-	no res:HTTPResponse |
-		res in stored implies
-			no h:CacheControlHeader | h in res.headers and (Private in h.options)
-
-	all res:HTTPResponse |
-		res in stored implies
-			((some op:SMaxage | op in HTTPResponse.headers.options) or
-			(some op:Maxage | op in HTTPResponse.headers.options) or
-			(some d:DateHeader, e:ExpiresHeader | d in HTTPResponse.headers and e in HTTPResponse.headers))
-}
-*/
-
+//どの端末にも属さないキャッシュは存在しない
 fact noOrphanedCaches {
 	all c:Cache |
 		one e:NetworkEndpoint | c = e.cache
 }
 
+//同じ端末に2つ以上のキャッシュは存在しない
 fact noMultipleCaches {
 	no disj e1, e2:NetworkEndpoint | e1.cache = e2.cache
 }
 
-//for reuse of response
-
-//for confirming identify of two responses
-//judge by headers
-pred equalResponse[tar:HTTPResponse, res:HTTPResponse]{
-	all h:HTTPHeader |
-			(h in tar.headers implies h in res.headers) and (h in res.headers implies h in tar.headers)
-}
-
-fact LimitHeader{
-	all h:HTTPHeader | h in HTTPResponse.headers or h in HTTPRequest.headers
-	all c:CacheOption | c in CacheControlHeader.options
-}
-
 run {
-	#PrivateCache = 1
-	#PublicCache = 0
-	#HTTPResponse > 0
-	#HTTPRequest > 0
+	#Cache = 1
 
 	#CacheStore = 1
+	#CacheReuse = 1
 
 	#IfModifiedSinceHeader = 0
 	#IfNoneMatchHeader = 0
@@ -176,4 +169,4 @@ run {
 	#AgeHeader = 0
 	#DateHeader = 0
 	#ExpiresHeader = 0
-}
+} for 10
