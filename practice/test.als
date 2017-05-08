@@ -10,9 +10,12 @@ fact DNSIsDisjointAmongstPrincipals {
 
 sig Time {}
 
+//イベントが直後に発生する制限解除
+/*
 pred happensBeforeOrdering[first:Event,second:Event]{
 	second.current in first.current.*next
 }
+*/
 
 fact Traces{
 	all t:Time | one e:Event | t = e.current
@@ -84,8 +87,6 @@ abstract sig HTTPResponseHeader extends HTTPHeader{}
 abstract sig HTTPRequestHeader extends HTTPHeader{}
 abstract sig HTTPGeneralHeader extends HTTPHeader{}
 abstract sig HTTPEntityHeader extends HTTPHeader{}
-abstract sig Status  {}
-abstract sig RedirectionStatus extends Status {}
 
 sig IfModifiedSinceHeader extends HTTPRequestHeader{}
 sig IfNoneMatchHeader extends HTTPRequestHeader{}
@@ -105,10 +106,10 @@ sig Maxage,SMaxage,Private,Public extends ResponseCacheOption{}
 //各ヘッダは適切なリクエスト・レスポンスに属する
 //どのCacheControlヘッダにも属さないCacheOptiionは存在しない
 fact noOrphanedHeaders {
-	all h:HTTPRequestHeader|some req:HTTPRequest|h in req.headers
-	all h:HTTPResponseHeader|some resp:HTTPResponse|h in resp.headers
-	all h:HTTPGeneralHeader|some req:HTTPRequest, resp:HTTPResponse|h in req.headers or h in resp.headers
-	all h:HTTPEntityHeader|some req:HTTPRequest, resp:HTTPResponse|h in req.headers or h in resp.headers
+	all h:HTTPRequestHeader|one req:HTTPRequest|h in req.headers
+	all h:HTTPResponseHeader|one resp:HTTPResponse|h in resp.headers
+	all h:HTTPGeneralHeader|one req:HTTPRequest, resp:HTTPResponse|h in req.headers or h in resp.headers
+	all h:HTTPEntityHeader|one req:HTTPRequest, resp:HTTPResponse|h in req.headers or h in resp.headers
 	all c:CacheOption | c in CacheControlHeader.options
 }
 
