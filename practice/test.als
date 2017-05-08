@@ -44,7 +44,11 @@ sig HTTPResponse extends HTTPEvent {
 
 abstract sig CacheEvent extends Event {
 	happen: one Cache
+	target: one HTTPResponse
 }
+
+sig CacheStore extends CacheEvent {}
+sig CacheReuse extends CacheEvent {}
 
 //----- トークン記述 -----
 sig Uri extends Token{}
