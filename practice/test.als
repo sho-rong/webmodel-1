@@ -39,16 +39,23 @@ abstract sig HTTPEvent extends NetworkEvent {
 sig HTTPRequest extends HTTPEvent {}
 
 sig HTTPResponse extends HTTPEvent {
-	reuse: lone CacheStatus
+	//reuse: lone CacheStatus
 }
 
 abstract sig CacheEvent extends Event {
-	happen: one Cache
+	happen: one Cache,
 	target: one HTTPResponse
 }
 
 sig CacheStore extends CacheEvent {}
 sig CacheReuse extends CacheEvent {}
+
+fact HappenCacheStore{
+	all e:CacheStore | one res:HTTPResponse | {
+		e.current = res.current.next
+		e.happen = res.to.cache
+	}
+}
 
 //----- トークン記述 -----
 sig Uri extends Token{}
@@ -84,12 +91,6 @@ fact noOrphanedHeaders {
 	all h:HTTPEntityHeader|some req:HTTPRequest, resp:HTTPResponse|h in req.headers or h in resp.headers
 }
 
-fact reusePossibility{
-	all res:HTTPResponse |
-		res in Cache.stored implies #(res.reuse)=1
-		else #(res.reuse)=0
-}
-
 //check pair of request and response
 fact ReqToRes{
 	all req:HTTPRequest | some res:HTTPResponse | req.uri = res.uri and res.current in req.current.*next
@@ -101,6 +102,12 @@ fact ReqToRes{
 Cache Definitions
 
 ****************************/
+
+abstract sig Cache{}
+sig PrivateCache extends Cache{}
+sig PublicCache extends Cache{}
+
+/*
 abstract sig Cache{
 	stored: set HTTPResponse,
 }{
@@ -129,6 +136,7 @@ sig PublicCache extends Cache{}{
 			(some op:Maxage | op in HTTPResponse.headers.options) or
 			(some d:DateHeader, e:ExpiresHeader | d in HTTPResponse.headers and e in HTTPResponse.headers))
 }
+*/
 
 fact noOrphanedCaches {
 	all c:Cache |
@@ -140,16 +148,6 @@ fact noMultipleCaches {
 }
 
 //for reuse of response
-fact reuseCache{
-	all res:HTTPResponse |
-		res in Cache.stored implies
-			one origin_res:HTTPResponse |
-				{
-					origin_res.reuse = OK
-					equalResponse[res, origin_res]
-					res.current in origin_res.current.*next
-				}
-}
 
 //for confirming identify of two responses
 //judge by headers
@@ -157,16 +155,6 @@ pred equalResponse[tar:HTTPResponse, res:HTTPResponse]{
 	all h:HTTPHeader |
 			(h in tar.headers implies h in res.headers) and (h in res.headers implies h in tar.headers)
 }
-
-pred checkExpiration[res:HTTPResponse]{
-	res.reuse = OK
-}
-
-/*
-pred validationResponse[res:HTTPResponse]{
-
-}
-*/
 
 fact LimitHeader{
 	all h:HTTPHeader | h in HTTPResponse.headers or h in HTTPRequest.headers
@@ -176,9 +164,10 @@ fact LimitHeader{
 run {
 	#PrivateCache = 1
 	#PublicCache = 0
-	#stored > 0
 	#HTTPResponse > 0
 	#HTTPRequest > 0
+
+	#CacheStore = 1
 
 	#IfModifiedSinceHeader = 0
 	#IfNoneMatchHeader = 0
