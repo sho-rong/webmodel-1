@@ -37,21 +37,25 @@ abstract sig HTTPEvent extends NetworkEvent {
 	headers: set HTTPHeader,
 	uri : one Uri
 }
-
 sig HTTPRequest extends HTTPEvent {}
-
 sig HTTPResponse extends HTTPEvent {}
+
+fact happenResponse{
+	all res:HTTPResponse | one req:HTTPRequest |{
+		res.current = req.current.next
+		res.uri = req.uri
+	}
+}
 
 abstract sig CacheEvent extends Event {
 	happen: one Cache,
 	target: one HTTPResponse
 }
-
 sig CacheStore extends CacheEvent {}
 sig CacheReuse extends CacheEvent {}
 
 //CacheStoreの発生条件
-fact HappenCacheStore{
+fact happenCacheStore{
 	all e:CacheStore | one res:HTTPResponse | {
 		e.current = res.current.next
 		e.target = res
@@ -60,7 +64,7 @@ fact HappenCacheStore{
 }
 
 //CacheReuseの発生条件
-fact HappenCacheReuse{
+fact happenCacheReuse{
 	all reuse:CacheReuse | some store:CacheStore, req:HTTPRequest |{
 		//応答するリクエストに対する条件
 		reuse.current = req.current.next
@@ -68,7 +72,6 @@ fact HappenCacheReuse{
 
 		//過去の格納イベントに対する条件
 		store.current in Time - reuse.current.*next
-		reuse.target.uri = store.target.uri
 		reuse.target = store.target
 	}
 }
@@ -113,29 +116,6 @@ fact noOrphanedHeaders {
 	all c:CacheOption | c in CacheControlHeader.options
 }
 
-//リクエストに対する応答の動作の条件
-fact ReqToRes{
-	all req:HTTPRequest | one res:HTTPResponse |
-		//レスポンスを新しく生成する場合
-		{
-			req.from = res.to
-			req.to = res.from
-			req.uri = res.uri
-
-			//レスポンスを新しく生成する場合
-			(req.current.next = res.current) or
-			//レスポンスを再利用する場合
-			(one store:CacheStore |
-				{
-					req.current.next = store.current
-					store.target = res
-				}
-			)
-		}
-
-	all res:HTTPResponse | one req:HTTPRequest | req.current.next = res.current
-}
-
 /****************************
 
 Cache Definitions
@@ -159,7 +139,6 @@ fact noMultipleCaches {
 
 run {
 	#Cache = 1
-
 	#CacheStore = 1
 	#CacheReuse = 1
 
@@ -170,4 +149,4 @@ run {
 	#AgeHeader = 0
 	#DateHeader = 0
 	#ExpiresHeader = 0
-} for 10
+} for 5
