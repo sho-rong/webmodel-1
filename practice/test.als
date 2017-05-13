@@ -67,7 +67,7 @@ fact happenCacheStore{
 		e.happen in PrivateCache implies {	//for PrivateCache
 			(one op:Maxage | op in res.headers.options) or
 			(one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
-		}else{	//for PublicCache
+		}else{
 			(one op:Maxage | op in res.headers.options) or
 			(one op:SMaxage | op in res.headers.options) or
 			(one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
@@ -79,7 +79,7 @@ fact happenCacheStore{
 
 //CacheReuseの発生条件
 fact happenCacheReuse{
-	all reuse:CacheReuse | some store:CacheStore, req:HTTPRequest |{
+	all reuse:CacheReuse | one store:CacheStore, req:HTTPRequest |{
 		//応答するリクエストに対する条件
 		reuse.current = req.current.next
 		reuse.target.uri = req.uri
@@ -93,12 +93,12 @@ fact happenCacheReuse{
 fact happenCacheVerification{
 	all veri:CacheVerification | some store:CacheStore, req:HTTPRequest |{
 		//応答するリクエストに対する条件
-		reuse.current = req.current.next
-		reuse.target.uri = req.uri
+		veri.current = req.current.next
+		veri.target.uri = req.uri
 
 		//過去の格納イベントに対する条件
-		store.current in Time - reuse.current.*next
-		reuse.target = store.target
+		store.current in Time - veri.current.*next
+		veri.target = store.target
 	}
 
 	//条件付レスポンスの生成
