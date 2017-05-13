@@ -53,6 +53,7 @@ abstract sig CacheEvent extends Event {
 }
 sig CacheStore extends CacheEvent {}
 sig CacheReuse extends CacheEvent {}
+sig CacheVerification extends CacheEvent {}
 
 //CacheStoreの発生条件
 fact happenCacheStore{
@@ -87,6 +88,25 @@ fact happenCacheReuse{
 		store.current in Time - reuse.current.*next
 		reuse.target = store.target
 	}
+}
+
+fact happenCacheVerification{
+	all veri:CacheVerification | some store:CacheStore, req:HTTPRequest |{
+		//応答するリクエストに対する条件
+		reuse.current = req.current.next
+		reuse.target.uri = req.uri
+
+		//過去の格納イベントに対する条件
+		store.current in Time - reuse.current.*next
+		reuse.target = store.target
+	}
+
+	//条件付レスポンスの生成
+
+	//条件付レスポンスへの応答
+
+	//検証結果に対する動作（再利用 or 新レスポンス）
+
 }
 
 //----- トークン記述 -----
