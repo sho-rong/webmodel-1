@@ -57,9 +57,22 @@ sig CacheReuse extends CacheEvent {}
 //CacheStoreの発生条件
 fact happenCacheStore{
 	all e:CacheStore | one res:HTTPResponse | {
+		//レスポンスが直前にやりとりされている
 		e.current = res.current.next
 		e.target = res
 		e.happen = res.to.cache
+
+		//レスポンスのヘッダ条件
+		e.happen in PrivateCache implies {	//for PrivateCache
+			(one op:Maxage | op in res.headers.options) or
+			(one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
+		}else{	//for PublicCache
+			(one op:Maxage | op in res.headers.options) or
+			(one op:SMaxage | op in res.headers.options) or
+			(one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
+
+			no op:Private | op in res.headers.options
+		}
 	}
 }
 
@@ -138,9 +151,9 @@ fact noMultipleCaches {
 }
 
 run {
-	#Cache = 1
+	#PublicCache = 1
 	#CacheStore = 1
-	#CacheReuse = 1
+	//#CacheReuse = 1
 
 	#IfModifiedSinceHeader = 0
 	#IfNoneMatchHeader = 0
@@ -149,4 +162,4 @@ run {
 	#AgeHeader = 0
 	#DateHeader = 0
 	#ExpiresHeader = 0
-} for 5
+} for 3
