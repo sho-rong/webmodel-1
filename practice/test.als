@@ -67,13 +67,14 @@ fact happenCacheStore{
 		e.happen in PrivateCache implies {	//for PrivateCache
 			(one op:Maxage | op in res.headers.options) or
 			(one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
-		}else{
+		}else{	//for PublicCache
 			(one op:Maxage | op in res.headers.options) or
 			(one op:SMaxage | op in res.headers.options) or
 			(one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
 
 			no op:Private | op in res.headers.options
 		}
+		one h:AgeHeader | h in res.headers
 	}
 }
 
@@ -144,8 +145,8 @@ sig Maxage,SMaxage,Private,Public extends ResponseCacheOption{}
 fact noOrphanedHeaders {
 	all h:HTTPRequestHeader|one req:HTTPRequest|h in req.headers
 	all h:HTTPResponseHeader|one resp:HTTPResponse|h in resp.headers
-	all h:HTTPGeneralHeader|one req:HTTPRequest, resp:HTTPResponse|h in req.headers or h in resp.headers
-	all h:HTTPEntityHeader|one req:HTTPRequest, resp:HTTPResponse|h in req.headers or h in resp.headers
+	all h:HTTPGeneralHeader|one e:HTTPEvent | h in e.headers
+	all h:HTTPEntityHeader|one e:HTTPEvent | h in e.headers
 	all c:CacheOption | c in CacheControlHeader.options
 }
 
