@@ -38,7 +38,9 @@ abstract sig HTTPEvent extends NetworkEvent {
 	uri : one Uri
 }
 sig HTTPRequest extends HTTPEvent {}
-sig HTTPResponse extends HTTPEvent {}
+sig HTTPResponse extends HTTPEvent {
+	statusCode: Status
+}
 
 fact happenResponse{
 	all res:HTTPResponse | one req:HTTPRequest |{
@@ -91,23 +93,64 @@ fact happenCacheReuse{
 	}
 }
 
+//検証イベントの流れ
+//CacheVerification -> HTTPRequest -> HTTPResponse -> CacheStore/HTTPResponse
 fact happenCacheVerification{
-	all veri:CacheVerification | some store:CacheStore, req:HTTPRequest |{
-		//応答するリクエストに対する条件
-		veri.current = req.current.next
-		veri.target.uri = req.uri
+	all veri:CacheVerification | {
+		some store:CacheStore, req:HTTPRequest |{
+			//応答するリクエストに対する条件
+			veri.current = req.current.next
+			veri.target.uri = req.uri
 
-		//過去の格納イベントに対する条件
-		store.current in Time - veri.current.*next
-		veri.target = store.target
+			//過去の格納イベントに対する条件
+			store.current in Time - veri.current.*next
+			veri.target = store.target
+			(one h:ETagHeader | h in veri.target.headers) or (one h:LastModifiedHeader | h in veri.target.headers)
+		}
+
+		//条件付リクエストの生成
+		one req:HTTPRequest | {
+			//リクエストの基本情報設定
+			req.current = veri.current.next
+			one p:NetworkEndpoint | {
+				p.cache = veri.happen
+				req.from = p
+			}
+			req.to = veri.target.from
+
+			//リクエストのヘッダ設定
+			((one h:ETagHeader | h in veri.target.headers) implies (one h:IfNoneMatchHeader | h in req.headers)) or
+			((one h:LastModifiedHeader | h in veri.target.headers) implies (one h:IfModifiedSinceHeader | h in req.headers))
+		}
+
+		//条件付リクエストへの応答
+		one res:HTTPResponse | {
+			res.current = veri.current.next.next
+			one req:HTTPRequest | {
+				req.current.next = res.current
+				res.from = req.to
+				res.to = req.from
+			}
+			(res.statusCode = c200) or (res.statusCode = c304)	//200:新しいレスポンスを使用, 304:レスポンスを再利用
+
+			//検証結果に対する動作（再利用 or 新レスポンス）
+			(res.statusCode = c200) implies
+				one reuse:CacheReuse | {
+					reuse.current = veri.current.next.next.next
+					reuse.target = veri.target
+				}
+			(res.statusCode = c304) implies
+				one res_result:HTTPResponse | {
+					res_result.current = veri.current.next.next.next
+					res_result.uri = res.uri
+					res_result.from = res.from
+					one req:HTTPRequest | {
+						req.current.next = veri.current
+						res_result.to = req.from
+					}
+				}
+		}
 	}
-
-	//条件付レスポンスの生成
-
-	//条件付レスポンスへの応答
-
-	//検証結果に対する動作（再利用 or 新レスポンス）
-
 }
 
 //----- トークン記述 -----
@@ -117,6 +160,11 @@ sig Uri{}
 fact noOrphanedUri{
 	all u:Uri | some e:HTTPEvent | u = e.uri
 }
+
+abstract sig Status  {}
+abstract sig RedirectionStatus extends Status {}
+lone sig c200,c401 extends Status{}
+lone sig c301,c302,c303,c304,c305,c306,c307 extends RedirectionStatus {}
 
 //----- HTTPヘッダ記述 -----
 abstract sig HTTPHeader {}
