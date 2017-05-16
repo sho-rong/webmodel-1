@@ -39,12 +39,13 @@ abstract sig HTTPEvent extends NetworkEvent {
 }
 sig HTTPRequest extends HTTPEvent {}
 sig HTTPResponse extends HTTPEvent {
-	statusCode: Status
+	statusCode: one Status
 }
 
 fact happenResponse{
 	all res:HTTPResponse | one req:HTTPRequest |{
-		res.current = req.current.next
+		happensBeforeOrdering[req, res]
+		//res.current = req.current.next
 		res.uri = req.uri
 	}
 }
@@ -59,14 +60,15 @@ sig CacheVerification extends CacheEvent {}
 
 //CacheStoreの発生条件
 fact happenCacheStore{
-	all e:CacheStore | one res:HTTPResponse | {
+	all store:CacheStore | one res:HTTPResponse | {
 		//レスポンスが直前にやりとりされている
-		e.current = res.current.next
-		e.target = res
-		e.happen = res.to.cache
+		happensBeforeOrdering[res, store]
+		//e.current = res.current.next
+		store.target = res
+		store.happen = res.to.cache
 
 		//レスポンスのヘッダ条件
-		e.happen in PrivateCache implies {	//for PrivateCache
+		store.happen in PrivateCache implies {	//for PrivateCache
 			(one op:Maxage | op in res.headers.options) or
 			(one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
 		}else{	//for PublicCache
@@ -84,11 +86,13 @@ fact happenCacheStore{
 fact happenCacheReuse{
 	all reuse:CacheReuse | one store:CacheStore, req:HTTPRequest |{
 		//応答するリクエストに対する条件
-		reuse.current = req.current.next
+		happensBeforeOrdering[req, reuse]
+		//reuse.current = req.current.next
 		reuse.target.uri = req.uri
 
 		//過去の格納イベントに対する条件
-		store.current in Time - reuse.current.*next
+		happensBeforeOrdering[store, reuse]
+		//store.current in Time - reuse.current.*next
 		reuse.target = store.target
 	}
 }
@@ -99,13 +103,15 @@ fact happenCacheVerification{
 	all veri:CacheVerification | {
 		//応答するリクエストに対する条件
 		one req:HTTPRequest |{
-			veri.current = req.current.next
+			happensBeforeOrdering[req, veri]
+			//veri.current = req.current.next
 			veri.target.uri = req.uri
 		}
 
 		//過去の格納イベントに対する条件
 		one store:CacheStore | {
-			store.current in Time - veri.current.*next
+			happensBeforeOrdering[store, veri]
+			//store.current in Time - veri.current.*next
 			veri.target = store.target
 			(one h:ETagHeader | h in veri.target.headers) or (one h:LastModifiedHeader | h in veri.target.headers)
 		}
@@ -113,7 +119,8 @@ fact happenCacheVerification{
 		//条件付リクエストの生成
 		one req:HTTPRequest | {
 			//リクエストの基本情報設定
-			req.current = veri.current.next
+			happensBeforeOrdering[veri, req]
+			//req.current = veri.current.next
 			one p:NetworkEndpoint | {
 				p.cache = veri.happen
 				req.from = p
@@ -128,34 +135,35 @@ fact happenCacheVerification{
 				h in req.headers
 				h in IfNoneMatchHeader + IfModifiedSinceHeader
 			}
-		}
 
-		//条件付リクエストへの応答
-		one res:HTTPResponse | {
-			res.current = veri.current.next.next
-			one req:HTTPRequest | {
-				req.current.next = res.current
+			//条件付リクエストへの応答
+			one res:HTTPResponse | {
+				happensBeforeOrdering[veri, res]
+				//res.current = veri.current.next.next
 				res.from = req.to
 				res.to = req.from
-			}
-			(res.statusCode = c200) or (res.statusCode = c304)	//200:新しいレスポンスを使用, 304:レスポンスを再利用
+				(res.statusCode = c200) or (res.statusCode = c304)	//200:新しいレスポンスを使用, 304:レスポンスを再利用
 
-			//検証結果に対する動作（再利用 or 新レスポンス）
-			(res.statusCode = c200) implies
-				one reuse:CacheReuse | {
-					reuse.current = veri.current.next.next.next
-					reuse.target = veri.target
-				}
-			(res.statusCode = c304) implies
-				one res_result:HTTPResponse | {
-					res_result.current = veri.current.next.next.next
-					res_result.uri = res.uri
-					res_result.from = res.from
-					one req:HTTPRequest | {
-						req.current.next = veri.current
-						res_result.to = req.from
+				//検証結果に対する動作（再利用 or 新レスポンス）
+				(res.statusCode = c200) implies
+					one reuse:CacheReuse | {
+						happensBeforeOrdering[veri, reuse]
+						//reuse.current = veri.current.next.next.next
+						reuse.target = veri.target
 					}
-				}
+
+				(res.statusCode = c304) implies
+					one res_result:HTTPResponse | {
+						happensBeforeOrdering[veri, res_result]
+						//res_result.current = veri.current.next.next.next
+						res_result.uri = res.uri
+						res_result.from = res.from
+						one req:HTTPRequest | {
+							req.current.next = veri.current
+							res_result.to = req.from
+						}
+					}
+			}
 		}
 	}
 }
