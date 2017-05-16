@@ -97,12 +97,14 @@ fact happenCacheReuse{
 //CacheVerification -> HTTPRequest -> HTTPResponse -> CacheStore/HTTPResponse
 fact happenCacheVerification{
 	all veri:CacheVerification | {
-		some store:CacheStore, req:HTTPRequest |{
-			//応答するリクエストに対する条件
+		//応答するリクエストに対する条件
+		one req:HTTPRequest |{
 			veri.current = req.current.next
 			veri.target.uri = req.uri
+		}
 
-			//過去の格納イベントに対する条件
+		//過去の格納イベントに対する条件
+		one store:CacheStore | {
 			store.current in Time - veri.current.*next
 			veri.target = store.target
 			(one h:ETagHeader | h in veri.target.headers) or (one h:LastModifiedHeader | h in veri.target.headers)
