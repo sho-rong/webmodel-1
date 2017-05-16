@@ -283,6 +283,14 @@ sig HTTPResponse extends HTTPEvent {
 	statusCode : Status
 }
 
+//HTTPResponseの発生条件
+fact happenResponse{
+	all res:HTTPResponse | one req:HTTPRequest |{
+		happensBefore[req, res]
+		res.uri = req.uri
+	}
+}
+
 abstract sig CacheEvent extends Event {
 	happen: one Cache,
 	target: one HTTPResponse
@@ -296,7 +304,6 @@ fact happenCacheStore{
 	all store:CacheStore | one res:HTTPResponse | {
 		//レスポンスが直前にやりとりされている
 		happensBefore[res, store]
-		//e.current = res.current.next
 		store.target = res
 		store.happen = res.to.cache
 
