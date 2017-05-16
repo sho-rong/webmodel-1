@@ -123,6 +123,11 @@ fact happenCacheVerification{
 			//リクエストのヘッダ設定
 			((one h:ETagHeader | h in veri.target.headers) implies (one h:IfNoneMatchHeader | h in req.headers)) or
 			((one h:LastModifiedHeader | h in veri.target.headers) implies (one h:IfModifiedSinceHeader | h in req.headers))
+
+			one h:HTTPHeader | {
+				h in req.headers
+				h in IfNoneMatchHeader + IfModifiedSinceHeader
+			}
 		}
 
 		//条件付リクエストへの応答
@@ -163,10 +168,15 @@ fact noOrphanedUri{
 	all u:Uri | some e:HTTPEvent | u = e.uri
 }
 
+//レスポンスの状態コード
 abstract sig Status  {}
 abstract sig RedirectionStatus extends Status {}
+lone sig c200 extends Status{}
+lone sig c304 extends RedirectionStatus {}
+/*
 lone sig c200,c401 extends Status{}
 lone sig c301,c302,c303,c304,c305,c306,c307 extends RedirectionStatus {}
+*/
 
 //----- HTTPヘッダ記述 -----
 abstract sig HTTPHeader {}
@@ -222,15 +232,16 @@ fact noMultipleCaches {
 }
 
 run {
+	#PrivateCache = 0
 	#PublicCache = 1
 	#CacheStore = 1
 	//#CacheReuse = 1
+	#CacheVerification = 1
 
 	#IfModifiedSinceHeader = 0
-	#IfNoneMatchHeader = 0
-	#ETagHeader = 0
 	#LastModifiedHeader = 0
-	#AgeHeader = 0
+	//#IfNoneMatchHeader = 0
+	//#ETagHeader = 0
 	#DateHeader = 0
 	#ExpiresHeader = 0
-} for 3
+} for 8
