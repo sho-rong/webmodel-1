@@ -11,7 +11,7 @@ fact DNSIsDisjointAmongstPrincipals {
 sig Time {}
 
 //イベントが直後に発生する制限解除
-pred happensBeforeOrdering[first:Event,second:Event]{
+pred happensBefore[first:Event,second:Event]{
 	second.current in first.current.*next
 }
 
@@ -42,7 +42,7 @@ sig HTTPResponse extends HTTPEvent {
 
 fact happenResponse{
 	all res:HTTPResponse | one req:HTTPRequest |{
-		happensBeforeOrdering[req, res]
+		happensBefore[req, res]
 		//res.current = req.current.next
 		res.uri = req.uri
 	}
@@ -60,7 +60,7 @@ sig CacheVerification extends CacheEvent {}
 fact happenCacheStore{
 	all store:CacheStore | one res:HTTPResponse | {
 		//レスポンスが直前にやりとりされている
-		happensBeforeOrdering[res, store]
+		happensBefore[res, store]
 		//e.current = res.current.next
 		store.target = res
 		store.happen = res.to.cache
@@ -84,13 +84,11 @@ fact happenCacheStore{
 fact happenCacheReuse{
 	all reuse:CacheReuse | one store:CacheStore, req:HTTPRequest |{
 		//応答するリクエストに対する条件
-		happensBeforeOrdering[req, reuse]
-		//reuse.current = req.current.next
+		happensBefore[req, reuse]
 		reuse.target.uri = req.uri
 
 		//過去の格納イベントに対する条件
-		happensBeforeOrdering[store, reuse]
-		//store.current in Time - reuse.current.*next
+		happensBefore[store, reuse]
 		reuse.target = store.target
 	}
 }
@@ -101,15 +99,13 @@ fact happenCacheVerification{
 	all veri:CacheVerification | {
 		//応答するリクエストに対する条件
 		one req:HTTPRequest |{
-			happensBeforeOrdering[req, veri]
-			//veri.current = req.current.next
+			happensBefore[req, veri]
 			veri.target.uri = req.uri
 		}
 
 		//過去の格納イベントに対する条件
 		one store:CacheStore | {
-			happensBeforeOrdering[store, veri]
-			//store.current in Time - veri.current.*next
+			happensBefore[store, veri]
 			veri.target = store.target
 			(one h:ETagHeader | h in veri.target.headers) or (one h:LastModifiedHeader | h in veri.target.headers)
 		}
@@ -117,13 +113,13 @@ fact happenCacheVerification{
 		//条件付リクエストの生成
 		one req:HTTPRequest | {
 			//リクエストの基本情報設定
-			happensBeforeOrdering[veri, req]
-			//req.current = veri.current.next
+			happensBefore[veri, req]
 			one p:NetworkEndpoint | {
 				p.cache = veri.happen
 				req.from = p
 			}
 			req.to = veri.target.from
+			req.uri = veri.target.uri
 
 			//リクエストのヘッダ設定
 			((one h:ETagHeader | h in veri.target.headers) implies (one h:IfNoneMatchHeader | h in req.headers)) or
@@ -136,8 +132,7 @@ fact happenCacheVerification{
 
 			//条件付リクエストへの応答
 			one res:HTTPResponse | {
-				happensBeforeOrdering[veri, res]
-				//res.current = veri.current.next.next
+				happensBefore[veri, res]
 				res.from = req.to
 				res.to = req.from
 				(res.statusCode = c200) or (res.statusCode = c304)	//200:新しいレスポンスを使用, 304:レスポンスを再利用
@@ -145,14 +140,14 @@ fact happenCacheVerification{
 				//検証結果に対する動作（再利用 or 新レスポンス）
 				(res.statusCode = c200) implies
 					one reuse:CacheReuse | {
-						happensBeforeOrdering[veri, reuse]
+						happensBefore[veri, reuse]
 						//reuse.current = veri.current.next.next.next
 						reuse.target = veri.target
 					}
 
 				(res.statusCode = c304) implies
 					one res_result:HTTPResponse | {
-						happensBeforeOrdering[veri, res_result]
+						happensBefore[veri, res_result]
 						//res_result.current = veri.current.next.next.next
 						res_result.uri = res.uri
 						res_result.from = res.from
