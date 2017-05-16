@@ -11,11 +11,9 @@ fact DNSIsDisjointAmongstPrincipals {
 sig Time {}
 
 //イベントが直後に発生する制限解除
-/*
 pred happensBeforeOrdering[first:Event,second:Event]{
 	second.current in first.current.*next
 }
-*/
 
 fact Traces{
 	all t:Time | one e:Event | t = e.current
