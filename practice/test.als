@@ -266,8 +266,8 @@ run {
 	#PrivateCache = 0
 	#PublicCache = 1
 	#CacheStore = 1
-	//#CacheReuse = 1
-	#CacheVerification = 1
+	#CacheReuse = 1
+	//#CacheVerification = 1
 
 	#IfModifiedSinceHeader = 0
 	#LastModifiedHeader = 0
@@ -275,4 +275,14 @@ run {
 	//#ETagHeader = 0
 	#DateHeader = 0
 	#ExpiresHeader = 0
-} for 8
+
+	no e:NetworkEvent |{
+		e.from = e.to
+	}
+
+	all disj req1, req2:HTTPRequest |{
+		req1.from = req2.from
+		req1.to = req2.to
+	}
+
+} for 5
