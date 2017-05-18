@@ -85,7 +85,31 @@ sig URL {path:Path, host:Origin}
 //時系列に従ったモデルの考察
 // second.pre >= first.post
 pred happensBefore[first:Event,second:Event]{
-	second.current in first.current.*next
+	second.current in first.current.next.*next
+}
+
+pred checkNotResponsed[req: HTTPRequest, t: Time]{
+	no res:HTTPResponse |{
+		req.uri = res.uri
+
+		{
+			//req -> ... -> res -> ... -> tの順でベントが発生
+			res.current in req.current.*next
+			t in res.current.next.*next
+
+			res.to = req.from
+		}or{
+			some reuse:CacheReuse|{
+				//req -> ... -> reuse -> ... -> tの順でベントが発生
+				reuse.current in req.current.*next
+				t in reuse.current.next.*next
+
+				reuse.to = req.from
+				reuse.target = res
+			}
+		}
+
+	}
 }
 
 abstract sig Method {}
@@ -281,6 +305,8 @@ fact happenResponse{
 	all res:HTTPResponse | one req:HTTPRequest |{
 		happensBefore[req, res]
 		res.uri = req.uri
+		res.from = req.to
+		res.to = req.from
 	}
 }
 
@@ -290,13 +316,13 @@ abstract sig CacheEvent extends Event {
 	target: one HTTPResponse
 }
 sig CacheStore extends CacheEvent {}
-sig CacheReuse extends CacheEvent {}
+sig CacheReuse extends CacheEvent {to: NetworkEndpoint}
 sig CacheVerification extends CacheEvent {}
 
 //CacheStoreの発生条件
 fact happenCacheStore{
 	all store:CacheStore | one res:HTTPResponse | {
-		//レスポンスが直前にやりとりされている
+		//レスポンスが以前にやりとりされている
 		happensBefore[res, store]
 		store.target = res
 		store.happen = res.to.cache
@@ -305,7 +331,8 @@ fact happenCacheStore{
 		store.happen in PrivateCache implies {	//for PrivateCache
 			(one op:Maxage | op in res.headers.options) or
 			(one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
-		}else{	//for PublicCache
+		}
+		store.happen in PublicCache implies{	//for PublicCache
 			(one op:Maxage | op in res.headers.options) or
 			(one op:SMaxage | op in res.headers.options) or
 			(one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
