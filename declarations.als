@@ -5,7 +5,6 @@ open util/ordering[Time]
 DNS
 
 ************************/
-
 sig DNS{
 	parent : DNS + DNSRoot,	//ドメインの各部を所持
 	resolvesTo : set NetworkEndpoint
@@ -57,14 +56,11 @@ fact DNSIsDisjointAmongstPrincipals {
 // turn this on for intermediate checks
 // run show {} for 6
 
-
-
 /***********************
 
 Items
 
 ************************/
-
 sig Time {}
 
 fact Traces{
@@ -103,6 +99,7 @@ fun safeMethods[]:set Method {
 	GET+OPTIONS
 }
 
+//レスポンスの状態コード
 abstract sig Status  {}
 abstract sig RedirectionStatus extends Status {}
 lone sig c301,c302,c303,c304,c305,c306,c307 extends RedirectionStatus {}
@@ -113,7 +110,6 @@ lone sig c200,c401 extends Status{}
 Network component
 
 ************************/
-
 sig NetworkEndpoint{cache : lone Cache}
 
 // we don't make HTTPServer abstract, it will be defined by the owner
@@ -250,14 +246,11 @@ pred basicModelIsConsistent {
   }
 }
 
-
-
 /***********************
 
 Event
 
 ************************/
-
 abstract sig Event {current : one Time}
 
 abstract sig NetworkEvent extends Event {
@@ -291,6 +284,7 @@ fact happenResponse{
 	}
 }
 
+//キャッシュの動作のイベントを定義
 abstract sig CacheEvent extends Event {
 	happen: one Cache,
 	target: one HTTPResponse
@@ -403,14 +397,11 @@ fact happenCacheVerification{
 	}
 }
 
-
-
 /***********************
 
 Headers
 
 ************************/
-
 abstract sig HTTPHeader {}
 abstract sig HTTPResponseHeader extends HTTPHeader{}
 abstract sig HTTPRequestHeader extends HTTPHeader{}
@@ -431,6 +422,9 @@ abstract sig ResponseCacheOption extends CacheOption{}
 sig NoCache,NoStore,NoTransform extends CacheOption{}
 sig Maxage,SMaxage,Private,Public extends ResponseCacheOption{}
 
+//どのリクエスト・レスポンスにも属さないヘッダは存在しない
+//各ヘッダは適切なリクエスト・レスポンスに属する
+//どのCacheControlヘッダにも属さないCacheOptiionは存在しない
 fact noOrphanedHeaders {
 	all h:HTTPRequestHeader|one req:HTTPRequest|h in req.headers
 	all h:HTTPResponseHeader|one resp:HTTPResponse|h in resp.headers
@@ -439,14 +433,11 @@ fact noOrphanedHeaders {
 	all c:CacheOption | c in CacheControlHeader.options
 }
 
-
-
 /***********************
 
 Caches
 
 ************************/
-
 abstract sig Cache{}
 sig PrivateCache extends Cache{}
 sig PublicCache extends Cache{}
