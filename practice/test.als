@@ -15,6 +15,31 @@ pred happensBefore[first:Event,second:Event]{
 	second.current in first.current.*next
 }
 
+//ある時点(t)でリクエストに応答されていない
+pred checkNotResponsed[req: HTTPRequest, t: Time]{
+	no res:HTTPResponse |{
+		req.uri = res.uri
+
+		{
+			//req -> ... -> res -> ... -> t
+			res.current in req.current.*next
+			t in res.current.*next
+
+			res.to = req.from
+		}or{
+			some reuse:CacheReuse|{
+				//req -> ... -> reuse -> ... -> t
+				reuse.current in req.current.*next
+				t in reuse.current.*next
+
+				reuse.to = req.from
+				reuse.target = res
+			}
+		}
+
+	}
+}
+
 fact Traces{
 	all t:Time | one e:Event | t = e.current
 }
@@ -43,7 +68,7 @@ sig HTTPResponse extends HTTPEvent {
 fact happenResponse{
 	all res:HTTPResponse | one req:HTTPRequest |{
 		happensBefore[req, res]
-		//res.current = req.current.next
+		checkNotResponsed[req, res.current]
 		res.uri = req.uri
 	}
 }
@@ -53,7 +78,7 @@ abstract sig CacheEvent extends Event {
 	target: one HTTPResponse
 }
 sig CacheStore extends CacheEvent {}
-sig CacheReuse extends CacheEvent {}
+sig CacheReuse extends CacheEvent {to:NetworkEndpoint}
 sig CacheVerification extends CacheEvent {}
 
 //CacheStoreの発生条件
@@ -85,11 +110,15 @@ fact happenCacheReuse{
 	all reuse:CacheReuse | one store:CacheStore, req:HTTPRequest |{
 		//応答するリクエストに対する条件
 		happensBefore[req, reuse]
+		checkNotResponsed[req, reuse.current]
 		reuse.target.uri = req.uri
 
 		//過去の格納イベントに対する条件
 		happensBefore[store, reuse]
 		reuse.target = store.target
+
+		//格納レスポンスの送信先
+		reuse.to = req.from
 	}
 }
 
@@ -101,6 +130,7 @@ fact happenCacheVerification{
 		one req:HTTPRequest |{
 			happensBefore[req, veri]
 			veri.target.uri = req.uri
+			checkNotResponsed[req, veri.current]
 		}
 
 		//過去の格納イベントに対する条件
@@ -132,7 +162,7 @@ fact happenCacheVerification{
 
 			//条件付リクエストへの応答
 			one res:HTTPResponse | {
-				happensBefore[veri, res]
+				happensBefore[req, res]
 				res.from = req.to
 				res.to = req.from
 				(res.statusCode = c200) or (res.statusCode = c304)	//200:新しいレスポンスを使用, 304:レスポンスを再利用
@@ -140,14 +170,14 @@ fact happenCacheVerification{
 				//検証結果に対する動作（再利用 or 新レスポンス）
 				(res.statusCode = c200) implies
 					one reuse:CacheReuse | {
-						happensBefore[veri, reuse]
+						happensBefore[res, reuse]
 						//reuse.current = veri.current.next.next.next
 						reuse.target = veri.target
 					}
 
 				(res.statusCode = c304) implies
 					one res_result:HTTPResponse | {
-						happensBefore[veri, res_result]
+						happensBefore[res, res_result]
 						//res_result.current = veri.current.next.next.next
 						res_result.uri = res.uri
 						res_result.from = res.from
