@@ -12,7 +12,7 @@ sig Time {}
 
 //イベントが直後に発生する制限解除
 pred happensBefore[first:Event,second:Event]{
-	second.current in first.current.*next
+	second.current in first.current.next.*next
 }
 
 //ある時点(t)でリクエストに応答されていない
@@ -21,16 +21,16 @@ pred checkNotResponsed[req: HTTPRequest, t: Time]{
 		req.uri = res.uri
 
 		{
-			//req -> ... -> res -> ... -> t
+			//req -> ... -> res -> ... -> tの順でベントが発生
 			res.current in req.current.*next
-			t in res.current.*next
+			t in res.current.next.*next
 
 			res.to = req.from
 		}or{
 			some reuse:CacheReuse|{
-				//req -> ... -> reuse -> ... -> t
+				//req -> ... -> reuse -> ... -> tの順でベントが発生
 				reuse.current in req.current.*next
-				t in reuse.current.*next
+				t in reuse.current.next.*next
 
 				reuse.to = req.from
 				reuse.target = res
@@ -70,6 +70,8 @@ fact happenResponse{
 		happensBefore[req, res]
 		checkNotResponsed[req, res.current]
 		res.uri = req.uri
+		res.from = req.to
+		res.to = req.from
 	}
 }
 
@@ -84,9 +86,8 @@ sig CacheVerification extends CacheEvent {}
 //CacheStoreの発生条件
 fact happenCacheStore{
 	all store:CacheStore | one res:HTTPResponse | {
-		//レスポンスが直前にやりとりされている
+		//レスポンスが以前にやりとりされている
 		happensBefore[res, store]
-		//e.current = res.current.next
 		store.target = res
 		store.happen = res.to.cache
 
@@ -94,7 +95,8 @@ fact happenCacheStore{
 		store.happen in PrivateCache implies {	//for PrivateCache
 			(one op:Maxage | op in res.headers.options) or
 			(one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
-		}else{	//for PublicCache
+		}
+		store.happen in PublicCache implies{	//for PublicCache
 			(one op:Maxage | op in res.headers.options) or
 			(one op:SMaxage | op in res.headers.options) or
 			(one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
@@ -171,14 +173,12 @@ fact happenCacheVerification{
 				(res.statusCode = c200) implies
 					one reuse:CacheReuse | {
 						happensBefore[res, reuse]
-						//reuse.current = veri.current.next.next.next
 						reuse.target = veri.target
 					}
 
 				(res.statusCode = c304) implies
 					one res_result:HTTPResponse | {
 						happensBefore[res, res_result]
-						//res_result.current = veri.current.next.next.next
 						res_result.uri = res.uri
 						res_result.from = res.from
 						one req:HTTPRequest | {
