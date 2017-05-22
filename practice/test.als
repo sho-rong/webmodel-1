@@ -50,6 +50,10 @@ sig HTTPServer extends HTTPConformist{}
 abstract sig HTTPClient extends HTTPConformist{}
 sig Browser extends HTTPClient {}
 
+abstract sig HTTPIntermediary extends HTTPConformist{}
+sig HTTPProxy extends HTTPIntermediary{}
+sig HTTPGateway extends HTTPIntermediary{}
+
 //----- イベント記述 -----
 abstract sig Event {
 	current : one Time
@@ -264,6 +268,11 @@ fact noOrphanedCaches {
 //同じ端末に2つ以上のキャッシュは存在しない
 fact noMultipleCaches {
 	no disj e1, e2:NetworkEndpoint | e1.cache = e2.cache
+}
+
+fact PublicAndPrivate{
+	all public:PublicCache | public in HTTPClient.cache
+	all private:PrivateCache | (private in HTTPServer.cache) or (private in HTTPIntermediary)
 }
 
 run {
