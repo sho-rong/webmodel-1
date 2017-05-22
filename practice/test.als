@@ -45,6 +45,10 @@ fact Traces{
 }
 
 sig NetworkEndpoint{cache : lone Cache}
+abstract sig HTTPConformist extends NetworkEndpoint{}
+sig HTTPServer extends HTTPConformist{}
+abstract sig HTTPClient extends HTTPConformist{}
+sig Browser extends HTTPClient {}
 
 //----- イベント記述 -----
 abstract sig Event {
