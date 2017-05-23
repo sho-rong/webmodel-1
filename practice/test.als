@@ -259,7 +259,7 @@ fact noOrphanedCaches {
 
 //同じ端末に2つ以上のキャッシュは存在しない
 fact noMultipleCaches {
-	no disj e1, e2:NetworkEndpoint | e1.cache = e2.cache
+	all p:NetworkEndpoint | lone c:Cache | c in p.cache
 }
 
 run {
