@@ -307,26 +307,40 @@ fact PublicAndPrivate{
 }
 
 run {
-	#PrivateCache = 0
-	#PublicCache = 1
-	#CacheStore = 1
-	#CacheReuse = 1
+	#HTTPRequest = 2
+	#HTTPResponse = 2
+	//#CacheStore = 1
+	//#CacheReuse = 1
 	//#CacheVerification = 1
+
+	one req:HTTPRequest | req.to in HTTPIntermediary
+	one res:HTTPResponse | res.to in HTTPIntermediary
+
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#HTTPIntermediary = 1
+	#Cache = 0
+	//#PrivateCache = 0
+	//#PublicCache = 1
 
 	#IfModifiedSinceHeader = 0
 	#LastModifiedHeader = 0
-	//#IfNoneMatchHeader = 0
-	//#ETagHeader = 0
-	#DateHeader = 0
-	#ExpiresHeader = 0
+	#IfNoneMatchHeader = 0
+	#ETagHeader = 0
+	//#DateHeader = 0
+	//#ExpiresHeader = 0
+	//#AgeHeader = 0
+	#CacheControlHeader = 0
+
+	#HTTPHeader = 1
 
 	no e:NetworkEvent |{
 		e.from = e.to
 	}
 
-	all disj req1, req2:HTTPRequest |{
+	/*all disj req1, req2:HTTPRequest |{
 		req1.from = req2.from
 		req1.to = req2.to
-	}
+	}*/
 
-} for 5
+} for 4
