@@ -54,6 +54,27 @@ abstract sig HTTPIntermediary extends HTTPConformist{}
 sig HTTPProxy extends HTTPIntermediary{}
 sig HTTPGateway extends HTTPIntermediary{}
 
+fact MoveOfIntermediary{
+	all e:HTTPEvent |{
+		e.to in HTTPIntermediary implies {
+			one copy:HTTPEvent |{
+				happensBefore[e, copy]
+				checkNotResponsed[e, copy.current]
+
+				e.to = copy.from
+				all h:HTTPHeader | h in e.headers implies h in copy.headers
+				e.uri = copy.uri
+
+				e in HTTPRequest implies copy in HTTPRequest
+				e in HTTPResponse implies {
+					copy in HTTPResponse
+					e.statusCode = copy.statusCode
+				}
+			}
+		}
+	}
+}
+
 fact ReqAndResMaker{
 	no req:HTTPRequest | req.from in HTTPServer
 	no req:HTTPRequest | req.to in HTTPClient
