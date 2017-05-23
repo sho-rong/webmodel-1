@@ -44,7 +44,7 @@ fact Traces{
 	all t:Time | one e:Event | t = e.current
 }
 
-sig NetworkEndpoint{cache : lone Cache}
+abstract sig NetworkEndpoint{cache : lone Cache}
 abstract sig HTTPConformist extends NetworkEndpoint{}
 sig HTTPServer extends HTTPConformist{}
 abstract sig HTTPClient extends HTTPConformist{}
@@ -62,7 +62,10 @@ fact MoveOfIntermediary{
 				checkNotResponsed[e, copy.current]
 
 				e.to = copy.from
-				all h:HTTPHeader | h in e.headers implies h in copy.headers
+				all h:HTTPHeader | {
+					h in e.headers implies h in copy.headers
+					h in copy.headers implies h in e.headers
+				}
 				e.uri = copy.uri
 
 				e in HTTPRequest implies copy in HTTPRequest
