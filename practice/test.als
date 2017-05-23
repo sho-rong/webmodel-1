@@ -273,10 +273,10 @@ sig Maxage,SMaxage,Private,Public extends ResponseCacheOption{}
 //各ヘッダは適切なリクエスト・レスポンスに属する
 //どのCacheControlヘッダにも属さないCacheOptiionは存在しない
 fact noOrphanedHeaders {
-	all h:HTTPRequestHeader|one req:HTTPRequest|h in req.headers
-	all h:HTTPResponseHeader|one resp:HTTPResponse|h in resp.headers
-	all h:HTTPGeneralHeader|one e:HTTPEvent | h in e.headers
-	all h:HTTPEntityHeader|one e:HTTPEvent | h in e.headers
+	all h:HTTPRequestHeader|some req:HTTPRequest|h in req.headers
+	all h:HTTPResponseHeader|some resp:HTTPResponse|h in resp.headers
+	all h:HTTPGeneralHeader|some e:HTTPEvent | h in e.headers
+	all h:HTTPEntityHeader|some e:HTTPEvent | h in e.headers
 	all c:CacheOption | c in CacheControlHeader.options
 }
 
