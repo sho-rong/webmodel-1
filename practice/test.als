@@ -54,6 +54,13 @@ abstract sig HTTPIntermediary extends HTTPConformist{}
 sig HTTPProxy extends HTTPIntermediary{}
 sig HTTPGateway extends HTTPIntermediary{}
 
+fact ReqAndResMaker{
+	no req:HTTPRequest | req.from in HTTPServer
+	no req:HTTPRequest | req.to in HTTPClient
+	no res:HTTPResponse | res.from in HTTPClient
+	no res:HTTPResponse | res.to in HTTPServer
+}
+
 //----- イベント記述 -----
 abstract sig Event {
 	current : one Time
