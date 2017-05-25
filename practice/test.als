@@ -265,9 +265,18 @@ sig DateHeader extends HTTPGeneralHeader{}
 sig ExpiresHeader extends HTTPEntityHeader{}
 
 abstract sig CacheOption{}
+abstract sig RequestCacheOption extends CacheOption{}
 abstract sig ResponseCacheOption extends CacheOption{}
-sig NoCache,NoStore,NoTransform extends CacheOption{}
-sig Maxage,SMaxage,Private,Public extends ResponseCacheOption{}
+//all
+/*
+sig Maxage,NoCache,NoStore,NoTransform extends CacheOption{}
+sig MaxStale,MinStale,OnlyIfCached extends RequestCacheOption{}
+sig MustRevalidate,Public,Private,ProxyRevalidate,SMaxage extends ResponseCacheOption{}
+*/
+//for simple model
+sig Maxage,NoCache,NoStore extends CacheOption{}
+sig OnlyIfCached extends RequestCacheOption{}
+sig Public,Private,SMaxage extends ResponseCacheOption{}
 
 //どのリクエスト・レスポンスにも属さないヘッダは存在しない
 //各ヘッダは適切なリクエスト・レスポンスに属する
@@ -278,6 +287,8 @@ fact noOrphanedHeaders {
 	all h:HTTPGeneralHeader|some e:HTTPEvent | h in e.headers
 	all h:HTTPEntityHeader|some e:HTTPEvent | h in e.headers
 	all c:CacheOption | c in CacheControlHeader.options
+	all c:RequestCacheOption | c in HTTPRequest.headers.options
+	all c:ResponseCacheOption | c in HTTPResponse.headers.options
 }
 
 /****************************
