@@ -276,7 +276,7 @@ sig MustRevalidate,Public,Private,ProxyRevalidate,SMaxage extends ResponseCacheO
 //for simple model
 sig Maxage,NoCache,NoStore extends CacheOption{}
 sig OnlyIfCached extends RequestCacheOption{}
-sig Public,Private,SMaxage extends ResponseCacheOption{}
+sig Private,SMaxage extends ResponseCacheOption{}
 
 //どのリクエスト・レスポンスにも属さないヘッダは存在しない
 //各ヘッダは適切なリクエスト・レスポンスに属する
@@ -289,6 +289,38 @@ fact noOrphanedHeaders {
 	all c:CacheOption | c in CacheControlHeader.options
 	all c:RequestCacheOption | c in HTTPRequest.headers.options
 	all c:ResponseCacheOption | c in HTTPResponse.headers.options
+}
+
+//CacheControlHeaderのオプションに関する制限
+fact CCHeaderOption{
+	//for "no-cache"
+	all reuse:CacheReuse |{
+		(some op:NoCache | op in reuse.target.headers.options) implies {
+			one veri:CacheVerification | {
+				happensBefore[veri,reuse]
+				veri.target = reuse.target
+				veri.happen = reuse.happen
+			}
+		}
+	}
+
+	//for "no-store"
+	no store:CacheStore | some op:NoStore | op in store.target.headers.options
+
+	//for only-if-cached
+	all req:HTTPRequest | (some op:OnlyIfCached | op in req.headers.options) implies {
+		some reuse:CacheReuse | {
+			happensBefore[req, reuse]
+			reuse.target.uri = req.uri
+			reuse.to = req.from
+		}
+	}
+
+	//for "private"
+	no op:Private | some store:CacheStore | {
+		store.happen in PublicCache
+		op in store.target.headers.options
+	}
 }
 
 /****************************
