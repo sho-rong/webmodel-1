@@ -345,8 +345,8 @@ fact noMultipleCaches {
 }
 
 fact PublicAndPrivate{
-	all pub:PublicCache | pub in HTTPClient.cache
-	all pri:PrivateCache | (pri in HTTPServer.cache) or (pri in HTTPIntermediary.cache)
+	all pri:PrivateCache | pri in HTTPClient.cache
+	all pub:PublicCache | (pub in HTTPServer.cache) or (pub in HTTPIntermediary.cache)
 }
 
 run {
