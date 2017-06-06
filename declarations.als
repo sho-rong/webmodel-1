@@ -776,8 +776,13 @@ fact HTTPTransactionsAreSane {
 //, 2  Origin,
 
 run show{
-	#HTTPResponse = 1
-	#HTTPRequest = 1
-	#CacheStore = 1
-	#Event = 3
-}
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#HTTPIntermediary = 1
+	#Cache = 0
+
+	#HTTPRequest > 0
+	#HTTPResponse > 0
+	one req:HTTPRequest | req.to in HTTPIntermediary
+	one res:HTTPResponse | res.to in HTTPIntermediary
+} for 4
