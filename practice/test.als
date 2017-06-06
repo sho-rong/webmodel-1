@@ -230,6 +230,23 @@ fact happenCacheVerification{
 	}
 }
 
+sig HTTPTransaction {
+	req : HTTPRequest,
+	resp : lone HTTPResponse,
+	//cert : lone Certificate,
+	//cause : lone HTTPTransaction + RequestAPI
+}{
+	some resp implies {
+		//response can come from anyone but HTTP needs to say it is from correct person and hosts are the same, so schema is same
+		resp.host = req.host
+		happensBefore[req,resp]
+	}
+
+	/*req.host.schema = HTTPS implies some cert and some resp
+	some cert implies req.host.schema = HTTPS*/
+
+}
+
 //----- トークン記述 -----
 sig Uri{}
 
