@@ -105,12 +105,14 @@ sig HTTPResponse extends HTTPEvent {
 }
 
 fact happenResponse{
-	all res:HTTPResponse | one req:HTTPRequest |{
-		happensBefore[req, res]
-		checkNotResponsed[req, res.current]
-		res.uri = req.uri
-		res.from = req.to
-		res.to = req.from
+	all response:HTTPResponse | one request:HTTPRequest |{
+		happensBefore[request, response]
+		checkNotResponsed[request, response.current]
+		response.uri = request.uri
+		response.from = request.to
+		response.to = request.from
+
+		one t:HTTPTransaction | (t.req) = request and (t.resp) = response
 	}
 }
 
@@ -148,18 +150,20 @@ fact happenCacheStore{
 
 //CacheReuseの発生条件
 fact happenCacheReuse{
-	all reuse:CacheReuse | one store:CacheStore, req:HTTPRequest |{
+	all reuse:CacheReuse | one store:CacheStore, request:HTTPRequest |{
 		//応答するリクエストに対する条件
-		happensBefore[req, reuse]
-		checkNotResponsed[req, reuse.current]
-		reuse.target.uri = req.uri
+		happensBefore[request, reuse]
+		checkNotResponsed[request, reuse.current]
+		reuse.target.uri = request.uri
 
 		//過去の格納イベントに対する条件
 		happensBefore[store, reuse]
 		reuse.target = store.target
 
 		//格納レスポンスの送信先
-		reuse.to = req.from
+		reuse.to = request.from
+
+		one t:HTTPTransaction | t.req = request and t.resp = reuse.target
 	}
 }
 
@@ -231,20 +235,24 @@ fact happenCacheVerification{
 }
 
 sig HTTPTransaction {
-	req : HTTPRequest,
+	req : one HTTPRequest,
 	resp : lone HTTPResponse,
 	//cert : lone Certificate,
 	//cause : lone HTTPTransaction + RequestAPI
 }{
 	some resp implies {
 		//response can come from anyone but HTTP needs to say it is from correct person and hosts are the same, so schema is same
-		resp.host = req.host
+		//resp.host = req.host
 		happensBefore[req,resp]
 	}
 
 	/*req.host.schema = HTTPS implies some cert and some resp
 	some cert implies req.host.schema = HTTPS*/
 
+}
+
+fact limitHTTPTransaction{
+	all request:HTTPRequest | lone t:HTTPTransaction | t.req = request
 }
 
 //----- トークン記述 -----
