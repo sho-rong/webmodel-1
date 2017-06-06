@@ -85,7 +85,31 @@ sig URL {path:Path, host:Origin}
 //時系列に従ったモデルの考察
 // second.pre >= first.post
 pred happensBefore[first:Event,second:Event]{
-	second.current in first.current.*next
+	second.current in first.current.next.*next
+}
+
+pred checkNotResponsed[req: HTTPRequest, t: Time]{
+	no res:HTTPResponse |{
+		req.uri = res.uri
+
+		{
+			//req -> ... -> res -> ... -> tの順でベントが発生
+			res.current in req.current.*next
+			t in res.current.next.*next
+
+			res.to = req.from
+		}or{
+			some reuse:CacheReuse|{
+				//req -> ... -> reuse -> ... -> tの順でベントが発生
+				reuse.current in req.current.*next
+				t in reuse.current.next.*next
+
+				reuse.to = req.from
+				reuse.target = res
+			}
+		}
+
+	}
 }
 
 abstract sig Method {}
@@ -110,7 +134,7 @@ lone sig c200,c401 extends Status{}
 Network component
 
 ************************/
-sig NetworkEndpoint{cache : lone Cache}
+abstract sig NetworkEndpoint{cache : lone Cache}
 
 // we don't make HTTPServer abstract, it will be defined by the owner
 
@@ -121,6 +145,31 @@ abstract sig HTTPClient extends HTTPConformist{
 }
 sig Browser extends HTTPClient {
 	trustedCA : set certificateAuthority
+}
+
+abstract sig HTTPIntermediary extends HTTPConformist{}
+sig HTTPProxy extends HTTPIntermediary{}
+sig HTTPGateway extends HTTPIntermediary{}
+
+fact MoveOfIntermediary{
+    all e:HTTPEvent |{
+        e.to in HTTPIntermediary implies {
+            one copy:HTTPEvent |{
+                happensBefore[e, copy]
+                checkNotResponsed[e, copy.current]
+
+                e.to = copy.from
+                all h:HTTPHeader | h in e.headers implies h in copy.headers
+                e.uri = copy.uri
+
+                e in HTTPRequest implies copy in HTTPRequest
+                e in HTTPResponse implies {
+                    copy in HTTPResponse
+                    e.statusCode = copy.statusCode
+                }
+            }
+        }
+    }
 }
 
 /*sig InternetExplorer extends Browser{}
@@ -281,7 +330,16 @@ fact happenResponse{
 	all res:HTTPResponse | one req:HTTPRequest |{
 		happensBefore[req, res]
 		res.uri = req.uri
+		res.from = req.to
+		res.to = req.from
 	}
+}
+
+fact ReqAndResMaker{
+    no req:HTTPRequest | req.from in HTTPServer
+    no req:HTTPRequest | req.to in HTTPClient
+    no res:HTTPResponse | res.from in HTTPClient
+    no res:HTTPResponse | res.to in HTTPServer
 }
 
 //キャッシュの動作のイベントを定義
@@ -290,13 +348,13 @@ abstract sig CacheEvent extends Event {
 	target: one HTTPResponse
 }
 sig CacheStore extends CacheEvent {}
-sig CacheReuse extends CacheEvent {}
+sig CacheReuse extends CacheEvent {to: NetworkEndpoint}
 sig CacheVerification extends CacheEvent {}
 
 //CacheStoreの発生条件
 fact happenCacheStore{
 	all store:CacheStore | one res:HTTPResponse | {
-		//レスポンスが直前にやりとりされている
+		//レスポンスが以前にやりとりされている
 		happensBefore[res, store]
 		store.target = res
 		store.happen = res.to.cache
@@ -305,7 +363,8 @@ fact happenCacheStore{
 		store.happen in PrivateCache implies {	//for PrivateCache
 			(one op:Maxage | op in res.headers.options) or
 			(one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
-		}else{	//for PublicCache
+		}
+		store.happen in PublicCache implies{	//for PublicCache
 			(one op:Maxage | op in res.headers.options) or
 			(one op:SMaxage | op in res.headers.options) or
 			(one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
@@ -418,19 +477,31 @@ sig DateHeader extends HTTPGeneralHeader{}
 sig ExpiresHeader extends HTTPEntityHeader{}
 
 abstract sig CacheOption{}
+abstract sig RequestCacheOption extends CacheOption{}
 abstract sig ResponseCacheOption extends CacheOption{}
-sig NoCache,NoStore,NoTransform extends CacheOption{}
-sig Maxage,SMaxage,Private,Public extends ResponseCacheOption{}
+//all
+/*
+sig Maxage,NoCache,NoStore,NoTransform extends CacheOption{}
+sig MaxStale,MinStale,OnlyIfCached extends RequestCacheOption{}
+sig MustRevalidate,Public,Private,ProxyRevalidate,SMaxage extends ResponseCacheOption{}
+*/
+//for simple model
+sig Maxage,NoCache,NoStore extends CacheOption{}
+sig OnlyIfCached extends RequestCacheOption{}
+sig Private,SMaxage extends ResponseCacheOption{}
+
 
 //どのリクエスト・レスポンスにも属さないヘッダは存在しない
 //各ヘッダは適切なリクエスト・レスポンスに属する
 //どのCacheControlヘッダにも属さないCacheOptiionは存在しない
 fact noOrphanedHeaders {
-	all h:HTTPRequestHeader|one req:HTTPRequest|h in req.headers
-	all h:HTTPResponseHeader|one resp:HTTPResponse|h in resp.headers
-	all h:HTTPGeneralHeader|one e:HTTPEvent | h in e.headers
-	all h:HTTPEntityHeader|one e:HTTPEvent | h in e.headers
+	all h:HTTPRequestHeader|some req:HTTPRequest|h in req.headers
+    all h:HTTPResponseHeader|some resp:HTTPResponse|h in resp.headers
+    all h:HTTPGeneralHeader|some e:HTTPEvent | h in e.headers
+    all h:HTTPEntityHeader|some e:HTTPEvent | h in e.headers
 	all c:CacheOption | c in CacheControlHeader.options
+	all c:RequestCacheOption | c in HTTPRequest.headers.options
+    all c:ResponseCacheOption | c in HTTPResponse.headers.options
 }
 
 /***********************
@@ -450,8 +521,14 @@ fact noOrphanedCaches {
 
 //同じ端末に2つ以上のキャッシュは存在しない
 fact noMultipleCaches {
-	no disj e1, e2:NetworkEndpoint | e1.cache = e2.cache
+	    all p:NetworkEndpoint | lone c:Cache | c in p.cache
 }
+
+fact PublicAndPrivate{
+    all pri:PrivateCache | pri in HTTPClient.cache
+    all pub:PublicCache | (pub in HTTPServer.cache) or (pub in HTTPIntermediary.cache)
+}
+
 
 // Browsers run a scriptContext
 sig ScriptContext {
@@ -699,8 +776,13 @@ fact HTTPTransactionsAreSane {
 //, 2  Origin,
 
 run show{
-	#HTTPResponse = 1
-	#HTTPRequest = 1
-	#CacheStore = 1
-	#Event = 3
-}
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#HTTPIntermediary = 1
+	#Cache = 0
+
+	#HTTPRequest > 0
+	#HTTPResponse > 0
+	one req:HTTPRequest | req.to in HTTPIntermediary
+	one res:HTTPResponse | res.to in HTTPIntermediary
+} for 4
