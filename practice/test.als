@@ -105,14 +105,14 @@ sig HTTPResponse extends HTTPEvent {
 }
 
 fact happenResponse{
-	all response:HTTPResponse | one request:HTTPRequest |{
-		happensBefore[request, response]
-		checkNotResponsed[request, response.current]
-		response.uri = request.uri
-		response.from = request.to
-		response.to = request.from
+	all res:HTTPResponse | one req:HTTPRequest |{
+		happensBefore[req, res]
+		checkNotResponsed[req, res.current]
+		res.uri = req.uri
+		res.from = req.to
+		res.to = req.from
 
-		one t:HTTPTransaction | (t.req) = request and (t.resp) = response
+		one t:HTTPTransaction | (t.request) = req and (t.response) = res
 	}
 }
 
@@ -150,20 +150,20 @@ fact happenCacheStore{
 
 //CacheReuseの発生条件
 fact happenCacheReuse{
-	all reuse:CacheReuse | one store:CacheStore, request:HTTPRequest |{
+	all reuse:CacheReuse | one store:CacheStore, req:HTTPRequest |{
 		//応答するリクエストに対する条件
-		happensBefore[request, reuse]
-		checkNotResponsed[request, reuse.current]
-		reuse.target.uri = request.uri
+		happensBefore[req, reuse]
+		checkNotResponsed[req, reuse.current]
+		reuse.target.uri = req.uri
 
 		//過去の格納イベントに対する条件
 		happensBefore[store, reuse]
 		reuse.target = store.target
 
 		//格納レスポンスの送信先
-		reuse.to = request.from
+		reuse.to = req.from
 
-		one t:HTTPTransaction | t.req = request and t.resp = reuse.target
+		one t:HTTPTransaction | t.request = req and t.response = reuse.target
 	}
 }
 
@@ -235,15 +235,15 @@ fact happenCacheVerification{
 }
 
 sig HTTPTransaction {
-	req : one HTTPRequest,
-	resp : lone HTTPResponse,
+	request : one HTTPRequest,
+	response : lone HTTPResponse,
 	//cert : lone Certificate,
 	//cause : lone HTTPTransaction + RequestAPI
 }{
-	some resp implies {
+	some response implies {
 		//response can come from anyone but HTTP needs to say it is from correct person and hosts are the same, so schema is same
 		//resp.host = req.host
-		happensBefore[req,resp]
+		happensBefore[request,response]
 	}
 
 	/*req.host.schema = HTTPS implies some cert and some resp
@@ -252,7 +252,7 @@ sig HTTPTransaction {
 }
 
 fact limitHTTPTransaction{
-	all request:HTTPRequest | lone t:HTTPTransaction | t.req = request
+	all req:HTTPRequest | lone t:HTTPTransaction | t.request = req
 }
 
 //----- トークン記述 -----
@@ -374,41 +374,34 @@ fact PublicAndPrivate{
 	all pub:PublicCache | (pub in HTTPServer.cache) or (pub in HTTPIntermediary.cache)
 }
 
-run {
-	#HTTPRequest = 2
-	#HTTPResponse = 2
-	//#CacheStore = 1
-	//#CacheReuse = 1
-	//#CacheVerification = 1
-
-	one req:HTTPRequest | req.to in HTTPIntermediary
-	one res:HTTPResponse | res.to in HTTPIntermediary
-
+run bcp{
 	#HTTPClient = 1
 	#HTTPServer = 1
 	#HTTPIntermediary = 1
-	#Cache = 0
-	//#PrivateCache = 0
-	//#PublicCache = 1
+	#PrivateCache = 1
+	#Cache = 1
+
+	#HTTPRequest = 3
+	#HTTPResponse = 2
+	#CacheStore = 1
+	#CacheReuse = 1
 
 	#IfModifiedSinceHeader = 0
 	#LastModifiedHeader = 0
 	#IfNoneMatchHeader = 0
 	#ETagHeader = 0
-	//#DateHeader = 0
-	//#ExpiresHeader = 0
+	#DateHeader = 0
+	#ExpiresHeader = 0
 	//#AgeHeader = 0
-	#CacheControlHeader = 0
+	//#CacheControlHeader = 0
 
-	#HTTPHeader = 1
-
-	no e:NetworkEvent |{
-		e.from = e.to
+	all req:HTTPRequest | {
+		req.from in HTTPClient implies req.to in HTTPIntermediary
+		req.from in HTTPIntermediary implies req.to in HTTPServer
 	}
 
-	/*all disj req1, req2:HTTPRequest |{
-		req1.from = req2.from
-		req1.to = req2.to
-	}*/
-
-} for 4
+	all res:HTTPResponse | {
+		res.from in HTTPServer implies res.to in HTTPIntermediary
+		res.from in HTTPIntermediary implies res.to in HTTPClient
+	}
+} for 7
