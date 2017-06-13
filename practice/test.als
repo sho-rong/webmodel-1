@@ -244,6 +244,9 @@ sig HTTPTransaction {
 		//response can come from anyone but HTTP needs to say it is from correct person and hosts are the same, so schema is same
 		//resp.host = req.host
 		happensBefore[request,response]
+
+		response.from = request.to
+		response.to = request.from
 	}
 
 	/*req.host.schema = HTTPS implies some cert and some resp
