@@ -395,7 +395,7 @@ run cachemine{
 	#Cache = 1
 	#PrivateCache = 1
 
-	#HTTPRequest = 3
+	#HTTPRequest = 2
 	#HTTPResponse = 2
 	#CacheStore = 1
 
@@ -419,7 +419,7 @@ run cachemine{
 		res.from in HTTPServer implies res.to in HTTPIntermediary
 		res.from in HTTPIntermediary implies res.to in HTTPClient
 	}
-} for 6
+} for 5
 
 run bcp{
 	#HTTPClient = 1
