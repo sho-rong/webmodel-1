@@ -56,22 +56,33 @@ sig HTTPGateway extends HTTPIntermediary{}
 
 fact MoveOfIntermediary{
 	all e:HTTPEvent |{
-		e.to in HTTPIntermediary implies {
-			one copy:HTTPEvent |{
-				happensBefore[e, copy]
-				checkNotResponsed[e, copy.current]
+		e.from in HTTPIntermediary implies{	//e:中継者から送信されるイベント
+			one original:HTTPEvent |{	//original:中継者に向けて送信されたイベント
+				happensBefore[original, e]
 
-				e.to = copy.from
-				all h:HTTPHeader | {
-					h in e.headers implies h in copy.headers
-					h in copy.headers implies h in e.headers
+				e.from = original.to
+				/*all h:HTTPHeader | {
+					h in e.headers implies h in original.headers
+					h in original.headers implies h in e.headers
+				}*/
+				e.headers = original.headers
+				e.uri = original.uri
+
+				original in HTTPRequest implies {
+					checkNotResponsed[original, e.current]
+					e in HTTPRequest
+
+					/*no req:HTTPRequest |{
+						req.to = e.to
+						req.from = e.from
+						req.uri = e.uri
+						req.current in original.current.*next
+						e.current in req.current.*next
+					}*/
 				}
-				e.uri = copy.uri
-
-				e in HTTPRequest implies copy in HTTPRequest
-				e in HTTPResponse implies {
-					copy in HTTPResponse
-					e.statusCode = copy.statusCode
+				original in HTTPResponse implies {
+					e in HTTPResponse
+					e.statusCode = original.statusCode
 				}
 			}
 		}
@@ -376,6 +387,39 @@ fact PublicAndPrivate{
 	all pri:PrivateCache | pri in HTTPClient.cache
 	all pub:PublicCache | (pub in HTTPServer.cache) or (pub in HTTPIntermediary.cache)
 }
+
+run cachemine{
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#HTTPIntermediary = 1
+	#Cache = 1
+	#PrivateCache = 1
+
+	#HTTPRequest = 3
+	#HTTPResponse = 2
+	#CacheStore = 1
+
+	#IfModifiedSinceHeader = 0
+	#LastModifiedHeader = 0
+	#IfNoneMatchHeader = 0
+	#ETagHeader = 0
+	#DateHeader = 0
+	#ExpiresHeader = 0
+	//#AgeHeader = 2
+	//#CacheControlHeader = 2
+
+	#Uri = 1
+
+	all req:HTTPRequest | {
+		req.from in HTTPClient implies req.to in HTTPIntermediary
+		req.from in HTTPIntermediary implies req.to in HTTPServer
+	}
+
+	all res:HTTPResponse | {
+		res.from in HTTPServer implies res.to in HTTPIntermediary
+		res.from in HTTPIntermediary implies res.to in HTTPClient
+	}
+} for 6
 
 run bcp{
 	#HTTPClient = 1
