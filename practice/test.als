@@ -380,6 +380,39 @@ fact PublicAndPrivate{
 	all pub:PublicCache | (pub in HTTPServer.cache) or (pub in HTTPIntermediary.cache)
 }
 
+run test_intermediary{
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#HTTPIntermediary = 1
+	#Cache = 0
+
+	#HTTPRequest = 2
+	#HTTPResponse = 2
+
+	#IfModifiedSinceHeader = 0
+	#LastModifiedHeader = 0
+	#IfNoneMatchHeader = 0
+	#ETagHeader = 0
+	#DateHeader = 0
+	#ExpiresHeader = 0
+	#AgeHeader = 0
+	//#CacheControlHeader = 0
+
+	no h:HTTPHeader |{
+		h in HTTPRequest.headers
+	}
+
+	all req:HTTPRequest | {
+		req.from in HTTPClient implies req.to in HTTPIntermediary
+		req.from in HTTPIntermediary implies req.to in HTTPServer
+	}
+
+	all res:HTTPResponse | {
+		res.from in HTTPServer implies res.to in HTTPIntermediary
+		res.from in HTTPIntermediary implies res.to in HTTPClient
+	}
+} for 4
+
 run cachemine{
 	#HTTPClient = 1
 	#HTTPServer = 1
@@ -449,14 +482,14 @@ run bcp{
 	}
 } for 7
 
-run test_intermediary{
+run test_reuse{
 	#HTTPClient = 1
 	#HTTPServer = 1
-	#HTTPIntermediary = 1
-	#Cache = 0
+	#HTTPIntermediary = 0
+	#PrivateCache = 1
+	#PublicCache = 0
 
-	#HTTPRequest = 2
-	#HTTPResponse = 2
+	#CacheReuse = 1
 
 	#IfModifiedSinceHeader = 0
 	#LastModifiedHeader = 0
@@ -464,20 +497,10 @@ run test_intermediary{
 	#ETagHeader = 0
 	#DateHeader = 0
 	#ExpiresHeader = 0
-	#AgeHeader = 0
+	//#AgeHeader = 0
 	//#CacheControlHeader = 0
 
 	no h:HTTPHeader |{
 		h in HTTPRequest.headers
 	}
-
-	all req:HTTPRequest | {
-		req.from in HTTPClient implies req.to in HTTPIntermediary
-		req.from in HTTPIntermediary implies req.to in HTTPServer
-	}
-
-	all res:HTTPResponse | {
-		res.from in HTTPServer implies res.to in HTTPIntermediary
-		res.from in HTTPIntermediary implies res.to in HTTPClient
-	}
-} for 4
+} for 5
