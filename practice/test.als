@@ -26,6 +26,7 @@ pred checkNotResponsed[req: HTTPRequest, t: Time]{
 			t in res.current.next.*next
 
 			res.to = req.from
+			res.from = req.to
 		}or{
 			some reuse:CacheReuse|{
 				//req -> ... -> reuse -> ... -> tの順でベントが発生
@@ -34,9 +35,12 @@ pred checkNotResponsed[req: HTTPRequest, t: Time]{
 
 				reuse.to = req.from
 				reuse.target = res
+				one p:NetworkEndpoint |{
+					p.cache = reuse.happen
+					(p = req.from) or (p = req.to)
+				}
 			}
 		}
-
 	}
 }
 
@@ -61,24 +65,14 @@ fact MoveOfIntermediary{
 				happensBefore[original, e]
 
 				e.from = original.to
-				/*all h:HTTPHeader | {
-					h in e.headers implies h in original.headers
-					h in original.headers implies h in e.headers
-				}*/
-				e.headers = original.headers
 				e.uri = original.uri
+
+				//ヘッダの変更能力を付加
+				//e.headers = original.headers
 
 				original in HTTPRequest implies {
 					checkNotResponsed[original, e.current]
 					e in HTTPRequest
-
-					/*no req:HTTPRequest |{
-						req.to = e.to
-						req.from = e.from
-						req.uri = e.uri
-						req.current in original.current.*next
-						e.current in req.current.*next
-					}*/
 				}
 				original in HTTPResponse implies {
 					e in HTTPResponse
@@ -223,14 +217,8 @@ fact happenCacheVerification{
 				res.to = req.from
 				(res.statusCode = c200) or (res.statusCode = c304)	//200:新しいレスポンスを使用, 304:レスポンスを再利用
 
-				//検証結果に対する動作（再利用 or 新レスポンス）
+				//検証結果に対する動作（新レスポンス or 再利用）
 				(res.statusCode = c200) implies
-					one reuse:CacheReuse | {
-						happensBefore[res, reuse]
-						reuse.target = veri.target
-					}
-
-				(res.statusCode = c304) implies
 					one res_result:HTTPResponse | {
 						happensBefore[res, res_result]
 						res_result.uri = res.uri
@@ -239,6 +227,13 @@ fact happenCacheVerification{
 							req.current.next = veri.current
 							res_result.to = req.from
 						}
+					}
+
+				(res.statusCode = c304) implies
+					one reuse:CacheReuse | {
+						happensBefore[res, reuse]
+						reuse.target = veri.target
+						reuse.to = req.from
 					}
 			}
 		}
@@ -255,9 +250,6 @@ sig HTTPTransaction {
 		//response can come from anyone but HTTP needs to say it is from correct person and hosts are the same, so schema is same
 		//resp.host = req.host
 		happensBefore[request,response]
-
-		response.from = request.to
-		response.to = request.from
 	}
 
 	/*req.host.schema = HTTPS implies some cert and some resp
