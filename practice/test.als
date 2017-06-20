@@ -160,6 +160,7 @@ fact happenCacheReuse{
 		happensBefore[req, reuse]
 		checkNotResponsed[req, reuse.current]
 		reuse.target.uri = req.uri
+		req.to.cache = store.happen or req.from.cache = store.happen
 
 		//過去の格納イベントに対する条件
 		happensBefore[store, reuse]
@@ -168,7 +169,7 @@ fact happenCacheReuse{
 		//格納レスポンスの送信先
 		reuse.to = req.from
 
-		one t:HTTPTransaction | t.request = req and t.response = reuse.target
+		one t:HTTPTransaction | t.request = req and t.re_res = reuse
 	}
 }
 
@@ -243,6 +244,7 @@ fact happenCacheVerification{
 sig HTTPTransaction {
 	request : one HTTPRequest,
 	response : lone HTTPResponse,
+	re_res : lone CacheReuse
 	//cert : lone Certificate,
 	//cause : lone HTTPTransaction + RequestAPI
 }{
@@ -252,6 +254,10 @@ sig HTTPTransaction {
 		happensBefore[request,response]
 	}
 
+	some re_res implies {
+		happensBefore[request, re_res]
+	}
+
 	/*req.host.schema = HTTPS implies some cert and some resp
 	some cert implies req.host.schema = HTTPS*/
 
@@ -259,6 +265,9 @@ sig HTTPTransaction {
 
 fact limitHTTPTransaction{
 	all req:HTTPRequest | lone t:HTTPTransaction | t.request = req
+	no t:HTTPTransaction |{
+		some t.response and some t.re_res
+	}
 }
 
 //----- トークン記述 -----
@@ -455,7 +464,7 @@ run bcp{
 	#HTTPServer = 1
 	#HTTPIntermediary = 1
 	#PrivateCache = 1
-	#Cache = 1
+	#PublicCache = 0
 
 	#HTTPRequest = 3
 	#HTTPResponse = 2
