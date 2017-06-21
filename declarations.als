@@ -401,7 +401,7 @@ fact happenCacheReuse{
 		//格納レスポンスの送信先
         reuse.to = req.from
 
-        one t:HTTPTransaction | t.request = req and t.response = reuse.target
+        //one t:HTTPTransaction | t.request = req and t.response = reuse.target
         one t:HTTPTransaction | t.request = req and t.re_res = reuse
 
 	}
@@ -415,6 +415,7 @@ fact happenCacheVerification{
 		one req:HTTPRequest |{
 			happensBefore[req, veri]
 			veri.target.uri = req.uri
+			checkNotResponsed[req, veri.current]
 		}
 
 		//過去の格納イベントに対する条件
@@ -446,7 +447,7 @@ fact happenCacheVerification{
 
 			//条件付リクエストへの応答
 			one res:HTTPResponse | {
-				happensBefore[veri, res]
+				happensBefore[req, res]
 				res.from = req.to
 				res.to = req.from
 				(res.statusCode = c200) or (res.statusCode = c304)	//200:新しいレスポンスを使用, 304:レスポンスを再利用
@@ -454,8 +455,7 @@ fact happenCacheVerification{
 				//検証結果に対する動作（新レスポンス or 再利用）
 				(res.statusCode = c200) implies
 					one res_result:HTTPResponse | {
-						happensBefore[veri, res_result]
-						//res_result.current = veri.current.next.next.next
+						happensBefore[res, res_result]
 						res_result.uri = res.uri
 						res_result.from = res.from
 						one req:HTTPRequest | {
@@ -466,9 +466,9 @@ fact happenCacheVerification{
 
 				(res.statusCode = c304) implies
 					one reuse:CacheReuse | {
-						happensBefore[veri, reuse]
-						//reuse.current = veri.current.next.next.next
+						happensBefore[res, reuse]
 						reuse.target = veri.target
+						reuse.to = req.from
 					}
 			}
 		}
@@ -586,8 +586,6 @@ sig HTTPTransaction {
 		//response can come from anyone but HTTP needs to say it is from correct person and hosts are the same, so schema is same
 		response.host = request.host
 		happensBefore[request,response]
-		response.from = request.to
-		response.to = request.from
 	}
 
 	some re_res implies {
