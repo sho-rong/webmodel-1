@@ -98,6 +98,7 @@ pred checkNotResponsed[req: HTTPRequest, t: Time]{
 			t in res.current.next.*next
 
 			res.to = req.from
+			res.from = req.to
 		}or{
 			some reuse:CacheReuse|{
 				//req -> ... -> reuse -> ... -> tの順でベントが発生
@@ -106,6 +107,11 @@ pred checkNotResponsed[req: HTTPRequest, t: Time]{
 
 				reuse.to = req.from
 				reuse.target = res
+
+				one p:NetworkEndpoint |{
+					p.cache = reuse.happen
+					(p = req.from) or (p = req.to)
+				}
 			}
 		}
 
@@ -153,22 +159,24 @@ sig HTTPGateway extends HTTPIntermediary{}
 
 fact MoveOfIntermediary{
     all e:HTTPEvent |{
-        e.to in HTTPIntermediary implies {
-            one copy:HTTPEvent |{
-                happensBefore[e, copy]
-                checkNotResponsed[e, copy.current]
+	    e.from in HTTPIntermediary implies{    //e:中継者から送信されるイベント
+	        one original:HTTPEvent |{    //original:中継者に向けて送信されたイベント
+	            happensBefore[original, e]
 
-                e.to = copy.from
-                all h:HTTPHeader | h in e.headers implies h in copy.headers
-                e.uri = copy.uri
+	            e.from = original.to
+	            e.uri = original.uri
 
-                e in HTTPRequest implies copy in HTTPRequest
-                e in HTTPResponse implies {
-                    copy in HTTPResponse
-                    e.statusCode = copy.statusCode
-                }
-            }
-        }
+	            original in HTTPRequest implies {
+	                checkNotResponsed[original, e.current]
+	                e in HTTPRequest
+	            }
+
+	            original in HTTPResponse implies {
+	                e in HTTPResponse
+	                e.statusCode = original.statusCode
+	            }
+	        }
+	    }
     }
 }
 
@@ -221,8 +229,8 @@ fact SecureIsHTTPSOnly {
 
 fact CSRFProtection {
 	all aResp:HTTPResponse | aResp.from in ORIGINAWARE.servers and aResp.statusCode=c200 implies {
-		(resp.aResp).req.method in safeMethods or (
-		let theoriginchain = ((resp.aResp).req.headers & OriginHeader).theorigin |
+		(response.aResp).request.method in safeMethods or (
+		let theoriginchain = ((response.aResp).request.headers & OriginHeader).theorigin |
 			some theoriginchain and theoriginchain.dnslabel in ORIGINAWARE.dnslabels
 		)
 	}
@@ -243,7 +251,7 @@ fact WebPrincipalsObeyTheHostHeader {
 				aResp.from in aResp.host.dnslabel.resolvesTo
 
 				//additionally it responds to some request and keep semantics similar to the way Browsers keep them
-				some t:HTTPTransaction | t.resp = aResp and t.req.host.dnslabel = t.resp.host.dnslabel and t.req.host.schema = t.resp.host.schema
+				some t:HTTPTransaction | t.response = aResp and t.request.host.dnslabel = t.response.host.dnslabel and t.request.host.schema = t.response.host.schema
 			}
 }
 
@@ -290,8 +298,8 @@ pred somePasswordExists {
 pred basicModelIsConsistent {
   some ScriptContext
   some t1:HTTPTransaction |{
-    some (t1.req.from & Browser ) and
-    some (t1.resp)
+    some (t1.request.from & Browser ) and
+    some (t1.response)
   }
 }
 
@@ -329,9 +337,12 @@ sig HTTPResponse extends HTTPEvent {
 fact happenResponse{
 	all res:HTTPResponse | one req:HTTPRequest |{
 		happensBefore[req, res]
+		checkNotResponsed[req, res.current]
 		res.uri = req.uri
 		res.from = req.to
 		res.to = req.from
+
+		one t:HTTPTransaction | t.request = req and t.response = res
 	}
 }
 
@@ -381,10 +392,18 @@ fact happenCacheReuse{
 		//応答するリクエストに対する条件
 		happensBefore[req, reuse]
 		reuse.target.uri = req.uri
+		req.to.cache = store.happen or req.from.cache = store.happen
 
 		//過去の格納イベントに対する条件
 		happensBefore[store, reuse]
 		reuse.target = store.target
+
+		//格納レスポンスの送信先
+        reuse.to = req.from
+
+        one t:HTTPTransaction | t.request = req and t.response = reuse.target
+        one t:HTTPTransaction | t.request = req and t.re_res = reuse
+
 	}
 }
 
@@ -432,15 +451,8 @@ fact happenCacheVerification{
 				res.to = req.from
 				(res.statusCode = c200) or (res.statusCode = c304)	//200:新しいレスポンスを使用, 304:レスポンスを再利用
 
-				//検証結果に対する動作（再利用 or 新レスポンス）
+				//検証結果に対する動作（新レスポンス or 再利用）
 				(res.statusCode = c200) implies
-					one reuse:CacheReuse | {
-						happensBefore[veri, reuse]
-						//reuse.current = veri.current.next.next.next
-						reuse.target = veri.target
-					}
-
-				(res.statusCode = c304) implies
 					one res_result:HTTPResponse | {
 						happensBefore[veri, res_result]
 						//res_result.current = veri.current.next.next.next
@@ -450,6 +462,13 @@ fact happenCacheVerification{
 							req.current.next = veri.current
 							res_result.to = req.from
 						}
+					}
+
+				(res.statusCode = c304) implies
+					one reuse:CacheReuse | {
+						happensBefore[veri, reuse]
+						//reuse.current = veri.current.next.next.next
+						reuse.target = veri.target
 					}
 			}
 		}
@@ -537,7 +556,7 @@ sig ScriptContext {
 	transactions: set HTTPTransaction
 }{
 // Browsers are honest, they set the from correctly
-	transactions.req.from = location
+	transactions.request.from = location
 }
 
 //sig location extends HTTPResponseHeader {targetOrigin : Origin, targetPath : Path}
@@ -557,40 +576,53 @@ abstract sig RequestAPI{} // extends Event
 
 
 sig HTTPTransaction {
-	req : HTTPRequest,
-	resp : lone HTTPResponse,
+	request : one HTTPRequest,
+	response : lone HTTPResponse,
+	re_res : lone CacheReuse,
 	cert : lone Certificate,
 	cause : lone HTTPTransaction + RequestAPI
 }{
-	some resp implies {
+	some response implies {
 		//response can come from anyone but HTTP needs to say it is from correct person and hosts are the same, so schema is same
-		resp.host = req.host
-		happensBefore[req,resp]
+		response.host = request.host
+		happensBefore[request,response]
+		response.from = request.to
+		response.to = request.from
 	}
 
-	req.host.schema = HTTPS implies some cert and some resp
-	some cert implies req.host.schema = HTTPS
+	some re_res implies {
+        happensBefore[request, re_res]
+    }
 
+	request.host.schema = HTTPS implies some cert and some response
+	some cert implies request.host.schema = HTTPS
+}
+
+fact limitHTTPTransaction{
+	all req:HTTPRequest | lone t:HTTPTransaction | t.request = req
+	no t:HTTPTransaction |{
+        some t.response and some t.re_res
+	}
 }
 
 fact CauseHappensBeforeConsequence  {
 	all t1: HTTPTransaction | some (t1.cause) implies {
-       (some t0:HTTPTransaction | (t0 in t1.cause and happensBefore[t0.resp, t1.req]))
+       (some t0:HTTPTransaction | (t0 in t1.cause and happensBefore[t0.response, t1.request]))
        or (some r0:RequestAPI | (r0 in t1.cause ))
        // or (some r0:RequestAPI | (r0 in t1.cause and happensBefore[r0, t1.req]))
     }
 }
 
 fun getTrans[e:HTTPEvent]:HTTPTransaction{
-	(req+resp).e
+	(request+response).e
 }
 
 fun getScriptContext[t:HTTPTransaction]:ScriptContext {
 		transactions.t
 }
 
-fun getContextOf[request:HTTPRequest]:Origin {
-	(transactions.(req.request)).owner
+fun getContextOf[req:HTTPRequest]:Origin {
+	(transactions.(request.req)).owner
 }
 
 pred isCrossOriginRequest[request:HTTPRequest]{
@@ -609,13 +641,13 @@ pred isCrossOriginRequest[request:HTTPRequest]{
 sig OriginHeader extends HTTPRequestHeader {theorigin: Origin}
 
 
-fun getFinalResponse[request:HTTPRequest]:HTTPResponse{
-        {response : HTTPResponse | not ( response.statusCode in RedirectionStatus) and response in ((req.request).*(~cause)).resp}
+fun getFinalResponse[req:HTTPRequest]:HTTPResponse{
+        {res : HTTPResponse | not ( res.statusCode in RedirectionStatus) and res in ((request.req).*(~cause)).response}
 }
 
-pred isFinalResponseOf[request:HTTPRequest, response : HTTPResponse] {
-       not ( response.statusCode in RedirectionStatus)
-       response in ((req.request).*(~cause)).resp
+pred isFinalResponseOf[req:HTTPRequest, res : HTTPResponse] {
+       not ( res.statusCode in RedirectionStatus)
+       res in ((request.req).*(~cause)).response
 }
 
 //enum Port{P80,P8080}
@@ -688,7 +720,7 @@ fact CookiesAreSameOriginAndSomeOneToldThemToTheClient{
 	all areq:HTTPRequest |{
 			areq.from in Browser
 			some ( areq.headers & CookieHeader)
-	} implies  all acookie :(areq.headers & CookieHeader).thecookie | some aresp: location.(areq.from).transactions.resp | {
+	} implies  all acookie :(areq.headers & CookieHeader).thecookie | some aresp: location.(areq.from).transactions.response | {
 				//don't do same origin check as http cookies can go over https
 				aresp.host.dnslabel = areq.host.dnslabel
 				acookie in (aresp.headers & SetCookieHeader).thecookie
@@ -712,12 +744,12 @@ pred hasKnowledgeViaUnencryptedHTTPEvent[c: Cookie, ne : NetworkEndpoint, usageE
 
 pred hasKnowledgeViaDirectHTTP[c:Cookie,ne:NetworkEndpoint,usageEvent:Event]{
 		some t: HTTPTransaction | {
-		happensBefore[t.req,usageEvent]
-		httpPacketHasCookie[c,t.req]
-		t.resp.from = ne
+		happensBefore[t.request,usageEvent]
+		httpPacketHasCookie[c,t.request]
+		t.response.from = ne
 	} or {
-		happensBefore[t.resp,usageEvent]
-		httpPacketHasCookie[c,t.resp]
+		happensBefore[t.response,usageEvent]
+		httpPacketHasCookie[c,t.response]
 		some ((transactions.t).location & ne)
 		}
 }
@@ -760,12 +792,12 @@ HTTP Facts
 ************************/
 fact scriptContextsAreSane {
 	all disj sc,sc':ScriptContext | no (sc.transactions & sc'.transactions)
-	all t:HTTPTransaction | t.req.from in Browser implies t in ScriptContext.transactions
+	all t:HTTPTransaction | t.request.from in Browser implies t in ScriptContext.transactions
 }
 
 
 fact HTTPTransactionsAreSane {
-	all disj t,t':HTTPTransaction | no (t.resp & t'.resp ) and no (t.req & t'.req)
+	all disj t,t':HTTPTransaction | no (t.response & t'.response ) and no (t.request & t'.request)
 }
 
 //run basicModelIsConsistent  for 8 but 3 HTTPResponse//, 3 HTTPRequest,
@@ -775,14 +807,128 @@ fact HTTPTransactionsAreSane {
 //1 ACTIVEATTACKER, 1 WEBATTACKER, 1 ORIGINAWARE,
 //, 2  Origin,
 
-run show{
-	#HTTPClient = 1
-	#HTTPServer = 1
-	#HTTPIntermediary = 1
-	#Cache = 0
+run test_reuse{
+    #HTTPClient = 1
+    #HTTPServer = 1
+    #HTTPIntermediary = 0
+    #PrivateCache = 1
+    #PublicCache = 0
 
-	#HTTPRequest > 0
-	#HTTPResponse > 0
-	one req:HTTPRequest | req.to in HTTPIntermediary
-	one res:HTTPResponse | res.to in HTTPIntermediary
+	#CacheReuse = 1
+
+    #IfModifiedSinceHeader = 0
+    #LastModifiedHeader = 0
+    #ETagHeader = 0
+    #DateHeader = 0
+    #ExpiresHeader = 0
+    //#AgeHeader = 0
+    //#CacheControlHeader = 0
+
+    no h:HTTPHeader |{
+        h in HTTPRequest.headers
+    }
+} for 5
+
+
+
+run test_intermediary{
+    #HTTPClient = 1
+    #HTTPServer = 1
+    #HTTPIntermediary = 1
+    #Cache = 0
+
+    #HTTPRequest = 2
+    #HTTPResponse = 2
+
+    #IfModifiedSinceHeader = 0
+    #LastModifiedHeader = 0
+    #IfNoneMatchHeader = 0
+    #ETagHeader = 0
+    #DateHeader = 0
+    #ExpiresHeader = 0
+    #AgeHeader = 0
+    //#CacheControlHeader = 0
+
+    no h:HTTPHeader |{
+        h in HTTPRequest.headers
+    }
+
+    all req:HTTPRequest | {
+        req.from in HTTPClient implies req.to in HTTPIntermediary
+        req.from in HTTPIntermediary implies req.to in HTTPServer
+    }
+
+    all res:HTTPResponse | {
+        res.from in HTTPServer implies res.to in HTTPIntermediary
+        res.from in HTTPIntermediary implies res.to in HTTPClient
+    }
 } for 4
+
+
+run cachemine{
+    #HTTPClient = 1
+    #HTTPServer = 1
+    #HTTPIntermediary = 1
+    #Cache = 1
+    #PrivateCache = 1
+
+    #HTTPRequest = 2
+    #HTTPResponse = 2
+    #CacheStore = 1
+
+    #IfModifiedSinceHeader = 0
+    #LastModifiedHeader = 0
+    #IfNoneMatchHeader = 0
+    #ETagHeader = 0
+    #DateHeader = 0
+    #ExpiresHeader = 0
+    //#AgeHeader = 2
+    //#CacheControlHeader = 2
+
+    #Uri = 1
+
+    no h:HTTPHeader |{
+    	h in HTTPRequest.headers
+    }
+
+    all req:HTTPRequest | {
+        req.from in HTTPClient implies req.to in HTTPIntermediary
+        req.from in HTTPIntermediary implies req.to in HTTPServer
+    }
+
+    all res:HTTPResponse | {
+        res.from in HTTPServer implies res.to in HTTPIntermediary
+        res.from in HTTPIntermediary implies res.to in HTTPClient
+    }
+} for 5
+
+run bcp{
+    #HTTPClient = 1
+    #HTTPServer = 1
+    #HTTPIntermediary = 1
+    #PrivateCache = 1
+    #PublicCache = 0
+
+    #HTTPRequest = 3
+    #HTTPResponse = 2
+    #CacheStore = 1
+    #CacheReuse = 1
+
+    #IfModifiedSinceHeader = 0
+    #LastModifiedHeader = 0
+    #IfNoneMatchHeader = 0
+    #ETagHeader = 0
+    #DateHeader = 0
+    #ExpiresHeader = 0
+    //#AgeHeader = 0
+    //#CacheControlHeader = 0
+
+    all req:HTTPRequest | {
+        req.from in HTTPClient implies req.to in HTTPIntermediary
+        req.from in HTTPIntermediary implies req.to in HTTPServer
+    }
+    all res:HTTPResponse | {
+        res.from in HTTPServer implies res.to in HTTPIntermediary
+        res.from in HTTPIntermediary implies res.to in HTTPClient
+    }
+} for 7
