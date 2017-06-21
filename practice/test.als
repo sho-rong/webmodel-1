@@ -1,16 +1,87 @@
 open util/ordering[Time]
 
+/***********************
+
+Network Component
+
+***********************/
 abstract sig Principal {
 	servers : set NetworkEndpoint,
 }
+abstract sig NetworkEndpoint{cache : lone Cache}
+abstract sig HTTPConformist extends NetworkEndpoint{}
+sig HTTPServer extends HTTPConformist{}
+abstract sig HTTPClient extends HTTPConformist{}
+sig Browser extends HTTPClient {}
+abstract sig HTTPIntermediary extends HTTPConformist{}
+sig HTTPProxy extends HTTPIntermediary{}
+sig HTTPGateway extends HTTPIntermediary{}
 
-fact DNSIsDisjointAmongstPrincipals {
-	all disj p1,p2 : Principal | no (p1.servers & p2.servers)
+fact MoveOfIntermediary{
+	all e:HTTPEvent |{
+		e.from in HTTPIntermediary implies{	//e:中継者から送信されるイベント
+			one original:HTTPEvent |{	//original:中継者に向けて送信されたイベント
+				happensBefore[original, e]
+
+				e.from = original.to
+				e.uri = original.uri
+
+				original in HTTPRequest implies {
+					checkNotResponsed[original, e.current]
+					e in HTTPRequest
+				}
+
+				original in HTTPResponse implies {
+					e in HTTPResponse
+					e.statusCode = original.statusCode
+				}
+			}
+		}
+	}
 }
 
-sig Time {}
+fact ReqAndResMaker{
+	no req:HTTPRequest | req.from in HTTPServer
+	no req:HTTPRequest | req.to in HTTPClient
+	no res:HTTPResponse | res.from in HTTPClient
+	no res:HTTPResponse | res.to in HTTPServer
+}
 
-//イベントが直後に発生する制限解除
+
+/***********************
+
+Event
+
+***********************/
+abstract sig Event {current : one Time}
+
+abstract sig NetworkEvent extends Event {
+	from: NetworkEndpoint,
+	to: NetworkEndpoint
+}
+
+abstract sig HTTPEvent extends NetworkEvent {
+	headers: set HTTPHeader,
+	uri: one Uri
+}
+
+sig HTTPRequest extends HTTPEvent {}
+sig HTTPResponse extends HTTPEvent {statusCode: one Status}
+
+//HTTPResponseの発生条件
+fact happenResponse{
+	all res:HTTPResponse | one req:HTTPRequest |{
+		happensBefore[req, res]
+		checkNotResponsed[req, res.current]
+		res.uri = req.uri
+		res.from = req.to
+		res.to = req.from
+
+		one t:HTTPTransaction | t.request = req and t.response = res
+	}
+}
+
+//firstがsecondよりも前に発生する
 pred happensBefore[first:Event,second:Event]{
 	second.current in first.current.next.*next
 }
@@ -35,6 +106,7 @@ pred checkNotResponsed[req: HTTPRequest, t: Time]{
 
 				reuse.to = req.from
 				reuse.target = res
+
 				one p:NetworkEndpoint |{
 					p.cache = reuse.happen
 					(p = req.from) or (p = req.to)
@@ -44,89 +116,13 @@ pred checkNotResponsed[req: HTTPRequest, t: Time]{
 	}
 }
 
-fact Traces{
-	all t:Time | one e:Event | t = e.current
-}
-
-abstract sig NetworkEndpoint{cache : lone Cache}
-abstract sig HTTPConformist extends NetworkEndpoint{}
-sig HTTPServer extends HTTPConformist{}
-abstract sig HTTPClient extends HTTPConformist{}
-sig Browser extends HTTPClient {}
-
-abstract sig HTTPIntermediary extends HTTPConformist{}
-sig HTTPProxy extends HTTPIntermediary{}
-sig HTTPGateway extends HTTPIntermediary{}
-
-fact MoveOfIntermediary{
-	all e:HTTPEvent |{
-		e.from in HTTPIntermediary implies{	//e:中継者から送信されるイベント
-			one original:HTTPEvent |{	//original:中継者に向けて送信されたイベント
-				happensBefore[original, e]
-
-				e.from = original.to
-				e.uri = original.uri
-
-				//ヘッダの変更能力を付加
-				//e.headers = original.headers
-
-				original in HTTPRequest implies {
-					checkNotResponsed[original, e.current]
-					e in HTTPRequest
-				}
-				original in HTTPResponse implies {
-					e in HTTPResponse
-					e.statusCode = original.statusCode
-				}
-			}
-		}
-	}
-}
-
-fact ReqAndResMaker{
-	no req:HTTPRequest | req.from in HTTPServer
-	no req:HTTPRequest | req.to in HTTPClient
-	no res:HTTPResponse | res.from in HTTPClient
-	no res:HTTPResponse | res.to in HTTPServer
-}
-
-//----- イベント記述 -----
-abstract sig Event {
-	current : one Time
-}
-
-abstract sig NetworkEvent extends Event {
-	from: NetworkEndpoint,
-	to: NetworkEndpoint
-}
-
-abstract sig HTTPEvent extends NetworkEvent {
-	headers: set HTTPHeader,
-	uri : one Uri
-}
-sig HTTPRequest extends HTTPEvent {}
-sig HTTPResponse extends HTTPEvent {
-	statusCode: one Status
-}
-
-fact happenResponse{
-	all res:HTTPResponse | one req:HTTPRequest |{
-		happensBefore[req, res]
-		checkNotResponsed[req, res.current]
-		res.uri = req.uri
-		res.from = req.to
-		res.to = req.from
-
-		one t:HTTPTransaction | (t.request) = req and (t.response) = res
-	}
-}
-
+//キャッシュの動作のイベントを定義
 abstract sig CacheEvent extends Event {
 	happen: one Cache,
 	target: one HTTPResponse
 }
 sig CacheStore extends CacheEvent {}
-sig CacheReuse extends CacheEvent {to:NetworkEndpoint}
+sig CacheReuse extends CacheEvent {to: NetworkEndpoint}
 sig CacheVerification extends CacheEvent {}
 
 //CacheStoreの発生条件
@@ -169,6 +165,7 @@ fact happenCacheReuse{
 		//格納レスポンスの送信先
 		reuse.to = req.from
 
+		//HTTPTransactionに登録
 		one t:HTTPTransaction | t.request = req and t.re_res = reuse
 	}
 }
@@ -241,54 +238,12 @@ fact happenCacheVerification{
 	}
 }
 
-sig HTTPTransaction {
-	request : one HTTPRequest,
-	response : lone HTTPResponse,
-	re_res : lone CacheReuse
-	//cert : lone Certificate,
-	//cause : lone HTTPTransaction + RequestAPI
-}{
-	some response implies {
-		//response can come from anyone but HTTP needs to say it is from correct person and hosts are the same, so schema is same
-		//resp.host = req.host
-		happensBefore[request,response]
-	}
 
-	some re_res implies {
-		happensBefore[request, re_res]
-	}
+/***********************
 
-	/*req.host.schema = HTTPS implies some cert and some resp
-	some cert implies req.host.schema = HTTPS*/
+Headers
 
-}
-
-fact limitHTTPTransaction{
-	all req:HTTPRequest | lone t:HTTPTransaction | t.request = req
-	no t:HTTPTransaction |{
-		some t.response and some t.re_res
-	}
-}
-
-//----- トークン記述 -----
-sig Uri{}
-
-//使用されないURIは存在しない
-fact noOrphanedUri{
-	all u:Uri | some e:HTTPEvent | u = e.uri
-}
-
-//レスポンスの状態コード
-abstract sig Status  {}
-abstract sig RedirectionStatus extends Status {}
-lone sig c200 extends Status{}
-lone sig c304 extends RedirectionStatus {}
-/*
-lone sig c200,c401 extends Status{}
-lone sig c301,c302,c303,c304,c305,c306,c307 extends RedirectionStatus {}
-*/
-
-//----- HTTPヘッダ記述 -----
+************************/
 abstract sig HTTPHeader {}
 abstract sig HTTPResponseHeader extends HTTPHeader{}
 abstract sig HTTPRequestHeader extends HTTPHeader{}
@@ -363,12 +318,12 @@ fact CCHeaderOption{
 	}
 }
 
+
 /****************************
 
-Cache Definitions
+Cache
 
 ****************************/
-
 abstract sig Cache{}
 sig PrivateCache extends Cache{}
 sig PublicCache extends Cache{}
@@ -388,6 +343,104 @@ fact PublicAndPrivate{
 	all pri:PrivateCache | pri in HTTPClient.cache
 	all pub:PublicCache | (pub in HTTPServer.cache) or (pub in HTTPIntermediary.cache)
 }
+
+
+/***********************
+
+DNS
+
+************************/
+fact DNSIsDisjointAmongstPrincipals {
+	all disj p1,p2 : Principal | no (p1.servers & p2.servers)
+}
+
+
+/***********************
+
+Token
+
+************************/
+sig Time {}
+
+fact Traces{
+	all t:Time | one e:Event | t = e.current
+}
+
+sig Uri{}
+
+//使用されないURIは存在しない
+fact noOrphanedUri{
+	all u:Uri | some e:HTTPEvent | u = e.uri
+}
+
+//レスポンスの状態コード
+abstract sig Status  {}
+abstract sig RedirectionStatus extends Status {}
+lone sig c200 extends Status{}
+lone sig c304 extends RedirectionStatus {}
+/*
+lone sig c200,c401 extends Status{}
+lone sig c301,c302,c303,c304,c305,c306,c307 extends RedirectionStatus {}
+*/
+
+
+/***********************
+
+HTTPTransaction
+
+************************/
+sig HTTPTransaction {
+	request : one HTTPRequest,
+	response : lone HTTPResponse,
+	re_res : lone CacheReuse,
+	//cert : lone Certificate,
+	//cause : lone HTTPTransaction + RequestAPI
+}{
+	some response implies {
+		//response can come from anyone but HTTP needs to say it is from correct person and hosts are the same, so schema is same
+		happensBefore[request,response]
+	}
+
+	some re_res implies {
+		happensBefore[request, re_res]
+	}
+}
+
+fact limitHTTPTransaction{
+	all req:HTTPRequest | lone t:HTTPTransaction | t.request = req
+	no t:HTTPTransaction |{
+		some t.response and some t.re_res
+	}
+}
+
+
+/****************************
+
+Test Code
+
+****************************/
+run test_reuse{
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#HTTPIntermediary = 0
+	#PrivateCache = 1
+	#PublicCache = 0
+
+	#CacheReuse = 1
+
+	#IfModifiedSinceHeader = 0
+	#LastModifiedHeader = 0
+	#IfNoneMatchHeader = 0
+	#ETagHeader = 0
+	#DateHeader = 0
+	#ExpiresHeader = 0
+	//#AgeHeader = 0
+	//#CacheControlHeader = 0
+
+	no h:HTTPHeader |{
+		h in HTTPRequest.headers
+	}
+} for 5
 
 run test_intermediary{
 	#HTTPClient = 1
@@ -490,26 +543,3 @@ run bcp{
 		res.from in HTTPIntermediary implies res.to in HTTPClient
 	}
 } for 7
-
-run test_reuse{
-	#HTTPClient = 1
-	#HTTPServer = 1
-	#HTTPIntermediary = 0
-	#PrivateCache = 1
-	#PublicCache = 0
-
-	#CacheReuse = 1
-
-	#IfModifiedSinceHeader = 0
-	#LastModifiedHeader = 0
-	#IfNoneMatchHeader = 0
-	#ETagHeader = 0
-	#DateHeader = 0
-	#ExpiresHeader = 0
-	//#AgeHeader = 0
-	//#CacheControlHeader = 0
-
-	no h:HTTPHeader |{
-		h in HTTPRequest.headers
-	}
-} for 5

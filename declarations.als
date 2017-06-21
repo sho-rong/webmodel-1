@@ -2,92 +2,112 @@ open util/ordering[Time]
 
 /***********************
 
-DNS
+Network Component
 
-************************/
-sig DNS{
-	parent : DNS + DNSRoot,	//ドメインの各部を所持
-	resolvesTo : set NetworkEndpoint
-}{
-// A DNS Label resolvesTo something
-//1つ以上のNetworkEndpointに接続
-	some resolvesTo
-}
-
-//定数:DNSroot
-one sig DNSRoot {}
-
-//全てのDNSについて、自身からたどれるparentの集合に自身は含まれない
-fact dnsIsAcyclic {
-	 all x: DNS | x !in x.^parent
-//	 all x:dns-dnsRoot | some x.parent
-}
-
-// s is  a subdomain of d
-//sのparentをたどるとdが存在する⇔sがdのサブドメインである
-pred isSubdomainOf[s: DNS, d: DNS]{
-   //e.g. .stanford.edu is a subdomain of .edu
-  d in s.*parent
-}
-
-//PrincipalはNetworkEndpointと対応するDNSを持つ
+***********************/
 abstract sig Principal {
 // without the -HTTPClient the HTTPS check fails
 	servers : set NetworkEndpoint,
 	dnslabels : set DNS,
 }
-
-//DNSから対象のPrincipalを取得
-fun getPrincipalFromDNS[dns : DNS]:Principal{
-	dnslabels.dns
+abstract sig NetworkEndpoint{cache : lone Cache}
+abstract sig HTTPConformist extends NetworkEndpoint{}
+sig HTTPServer extends HTTPConformist{}
+abstract sig HTTPClient extends HTTPConformist{
+  owner:WebPrincipal // owner of the HTTPClient process
+}
+sig Browser extends HTTPClient {
+	trustedCA : set certificateAuthority
 }
 
-//Originから対象のPrincipalを取得
-fun getPrincipalFromOrigin[o: Origin]:Principal{
-	getPrincipalFromDNS[o.dnslabel]
+/*sig InternetExplorer extends Browser{}
+sig InternetExplorer7 extends InternetExplorer{}
+sig InternetExplorer8 extends InternetExplorer{}
+sig Firefox extends Browser{}
+sig Firefox3 extends Firefox {}
+sig Safari extends Browser{}*/
+
+abstract sig HTTPIntermediary extends HTTPConformist{}
+sig HTTPProxy extends HTTPIntermediary{}
+sig HTTPGateway extends HTTPIntermediary{}
+
+fact MoveOfIntermediary{
+	all e:HTTPEvent |{
+		e.from in HTTPIntermediary implies{	//e:中継者から送信されるイベント
+			one original:HTTPEvent |{	//original:中継者に向けて送信されたイベント
+				happensBefore[original, e]
+
+				e.from = original.to
+				e.uri = original.uri
+
+				original in HTTPRequest implies {
+					checkNotResponsed[original, e.current]
+					e in HTTPRequest
+				}
+
+				original in HTTPResponse implies {
+					e in HTTPResponse
+					e.statusCode = original.statusCode
+				}
+			}
+		}
+	}
 }
 
-//異なるプリンシパルは同じDNS、同じサーバを持たない
-fact DNSIsDisjointAmongstPrincipals {
-	all disj p1,p2 : Principal | (no (p1.dnslabels & p2.dnslabels)) and ( no (p1.servers & p2.servers))
-//The servers disjointness is a problem for virtual hosts. We will replace it with disjoint amongst attackers and trusted people or something like that
+fact ReqAndResMaker{
+	no req:HTTPRequest | req.from in HTTPServer
+	no req:HTTPRequest | req.to in HTTPClient
+	no res:HTTPResponse | res.from in HTTPClient
+	no res:HTTPResponse | res.to in HTTPServer
 }
 
-// turn this on for intermediate checks
-// run show {} for 6
 
 /***********************
 
-Items
+Event
 
-************************/
-sig Time {}
+***********************/
+abstract sig Event {current : one Time}
 
-fact Traces{
-	all t:Time | one e:Event | t = e.current
+abstract sig NetworkEvent extends Event {
+	from: NetworkEndpoint,
+	to: NetworkEndpoint
 }
 
-abstract sig Token {}
-//秘匿情報 作成者、期限を持つ
-abstract sig Secret extends Token {
-	madeBy : Principal,
-	expiration : one Int,
+abstract sig HTTPEvent extends NetworkEvent {
+	headers: set HTTPHeader,
+	host : Origin,
+	uri: one Uri
 }
 
-sig Uri{}
-//使用されないURIは存在しない
-fact noOrphanedUri{
-	all u:Uri | some e:HTTPEvent | u = e.uri
+sig HTTPRequest extends HTTPEvent {
+  // host + path == url
+	method: Method,
+	path : Path,
+	queryString : set attributeNameValuePair,  // URL query string parameters
+	body :  set Token
+}
+sig HTTPResponse extends HTTPEvent {statusCode: one Status}
+
+//HTTPResponseの発生条件
+fact happenResponse{
+	all res:HTTPResponse | one req:HTTPRequest |{
+		happensBefore[req, res]
+		checkNotResponsed[req, res.current]
+		res.uri = req.uri
+		res.from = req.to
+		res.to = req.from
+
+		one t:HTTPTransaction | t.request = req and t.response = res
+	}
 }
 
-sig URL {path:Path, host:Origin}
-
-//時系列に従ったモデルの考察
-// second.pre >= first.post
+//firstがsecondよりも前に発生する
 pred happensBefore[first:Event,second:Event]{
 	second.current in first.current.next.*next
 }
 
+//ある時点(t)でリクエストに応答されていない
 pred checkNotResponsed[req: HTTPRequest, t: Time]{
 	no res:HTTPResponse |{
 		req.uri = res.uri
@@ -114,243 +134,7 @@ pred checkNotResponsed[req: HTTPRequest, t: Time]{
 				}
 			}
 		}
-
 	}
-}
-
-abstract sig Method {}
-one sig GET extends Method {}
-one sig PUT  extends Method {}
-one sig POST extends Method {}
-one sig DELETE extends Method {}
-one sig OPTIONS extends Method {}
-
-fun safeMethods[]:set Method {
-	GET+OPTIONS
-}
-
-//レスポンスの状態コード
-abstract sig Status  {}
-abstract sig RedirectionStatus extends Status {}
-lone sig c301,c302,c303,c304,c305,c306,c307 extends RedirectionStatus {}
-lone sig c200,c401 extends Status{}
-
-/***********************
-
-Network component
-
-************************/
-abstract sig NetworkEndpoint{cache : lone Cache}
-
-// we don't make HTTPServer abstract, it will be defined by the owner
-
-abstract sig HTTPConformist extends NetworkEndpoint{}
-sig HTTPServer extends HTTPConformist{}
-abstract sig HTTPClient extends HTTPConformist{
-  owner:WebPrincipal // owner of the HTTPClient process
-}
-sig Browser extends HTTPClient {
-	trustedCA : set certificateAuthority
-}
-
-abstract sig HTTPIntermediary extends HTTPConformist{}
-sig HTTPProxy extends HTTPIntermediary{}
-sig HTTPGateway extends HTTPIntermediary{}
-
-fact MoveOfIntermediary{
-    all e:HTTPEvent |{
-	    e.from in HTTPIntermediary implies{    //e:中継者から送信されるイベント
-	        one original:HTTPEvent |{    //original:中継者に向けて送信されたイベント
-	            happensBefore[original, e]
-
-	            e.from = original.to
-	            e.uri = original.uri
-
-	            original in HTTPRequest implies {
-	                checkNotResponsed[original, e.current]
-	                e in HTTPRequest
-	            }
-
-	            original in HTTPResponse implies {
-	                e in HTTPResponse
-	                e.statusCode = original.statusCode
-	            }
-	        }
-	    }
-    }
-}
-
-/*sig InternetExplorer extends Browser{}
-sig InternetExplorer7 extends InternetExplorer{}
-sig InternetExplorer8 extends InternetExplorer{}
-sig Firefox extends Browser{}
-sig Firefox3 extends Firefox {}
-sig Safari extends Browser{}*/
-
-
-
-/****************************
-
-HTTPServer Definitions
-
-****************************/
-lone sig ACTIVEATTACKER extends Principal{}
-
-//Passive Principals match their http / network parts
-abstract sig PassivePrincipal extends Principal{}{
-	servers in HTTPConformist
-}
-
-lone sig PASSIVEATTACKER extends PassivePrincipal{}
-sig WebPrincipal extends PassivePrincipal {
-  httpClients : set HTTPClient
-} { httpClients.owner = this }
-
-//HTTPAdherent so that it can make requests too
-lone sig WEBATTACKER extends WebPrincipal{}
-
-abstract sig NormalPrincipal extends WebPrincipal{} { 	dnslabels.resolvesTo in servers}
-lone sig GOOD extends NormalPrincipal{}
-lone sig SECURE extends NormalPrincipal{}
-lone sig ORIGINAWARE extends NormalPrincipal{}
-
-fact NonActiveFollowHTTPRules {
-// Old rule was :
-//	all t:HTTPTransaction | t.resp.from in HTTPServer implies t.req.host.server = t.resp.from
-// We rewrite to say HTTPAdherents cant spoof from part ... here we don't say anything about principal
-	all httpresponse:HTTPResponse | httpresponse.from in HTTPConformist implies httpresponse.from in httpresponse.host.dnslabel.resolvesTo
-}
-
-fact SecureIsHTTPSOnly {
-// Add to this the fact that transaction schema is consistent
-	all httpevent:HTTPEvent | httpevent.from in SECURE.servers implies httpevent.host.schema = HTTPS
-//	STS Requirement : all sc : ScriptContext | some (getPrincipalFromOrigin[sc.owner] & SECURE ) implies sc.transactions.req.host.schema=HTTPS
-}
-
-fact CSRFProtection {
-	all aResp:HTTPResponse | aResp.from in ORIGINAWARE.servers and aResp.statusCode=c200 implies {
-		(response.aResp).request.method in safeMethods or (
-		let theoriginchain = ((response.aResp).request.headers & OriginHeader).theorigin |
-			some theoriginchain and theoriginchain.dnslabel in ORIGINAWARE.dnslabels
-		)
-	}
-}
-
-fact NormalPrincipalsHaveNonTrivialDNSValues {
-// Normal Principals don't mess around with trivial DNS values
-   DNSRoot !in NormalPrincipal.dnslabels.parent
-}
-
-fact WebPrincipalsObeyTheHostHeader {
-	all aResp:HTTPResponse |
-		let p = servers.(aResp.from) |
-			p in WebPrincipal implies {
-				//the host header a NormalPrincipal Sets is always with the DNSLabels it owns
-				aResp.host.dnslabel in p.dnslabels
-				// it also makes sure that the from server is the same one that the dnslabel resolvesTo
-				aResp.from in aResp.host.dnslabel.resolvesTo
-
-				//additionally it responds to some request and keep semantics similar to the way Browsers keep them
-				some t:HTTPTransaction | t.response = aResp and t.request.host.dnslabel = t.response.host.dnslabel and t.request.host.schema = t.response.host.schema
-			}
-}
-
-fact NormalPrincipalsDontMakeRequests {
-	no aReq:HTTPRequest | aReq.from in NormalPrincipal.servers
-}
-
-
-
-/***********************************
-
-Client Definitions
-
-************************************/
-// Each user is associated with a set of network locations
-// from where they use their credentials
-pred isAuthorizedAccess[user:WebPrincipal, loc:NetworkEndpoint]{
-  loc in user.httpClients
-}
-
-/*fun smartClient[]:set Browser {
-  Firefox3 + InternetExplorer8
-}*/
-
-// Ideally want tp use the old Principals thing
-
-sig WWWAuthnHeader extends HTTPResponseHeader{}{
-  all resp:HTTPResponse| (some (WWWAuthnHeader & resp.headers)) => resp.statusCode=c401
-}
-
-
-// each user has at most one password
-sig UserPassword extends UserToken { }
-
-// sig AliceUserPassword extends UserPassword {} {id = Alice and madeBy in Alice }
-
-pred somePasswordExists {
-  some UserPassword //|p.madeBy in Alice
-}
-
-//run somePasswordExists for 8
-
-
-pred basicModelIsConsistent {
-  some ScriptContext
-  some t1:HTTPTransaction |{
-    some (t1.request.from & Browser ) and
-    some (t1.response)
-  }
-}
-
-/***********************
-
-Event
-
-************************/
-abstract sig Event {current : one Time}
-
-abstract sig NetworkEvent extends Event {
-    from: NetworkEndpoint,
-    to: NetworkEndpoint
-}
-
-abstract sig HTTPEvent extends NetworkEvent {
-	headers: set HTTPHeader,
-	host : Origin,
-	uri: one Uri
-}
-
-sig HTTPRequest extends HTTPEvent {
-  // host + path == url
-	method: Method,
-	path : Path,
-	queryString : set attributeNameValuePair,  // URL query string parameters
-	body :  set Token
-}
-
-sig HTTPResponse extends HTTPEvent {
-	statusCode : Status
-}
-
-//HTTPResponseの発生条件
-fact happenResponse{
-	all res:HTTPResponse | one req:HTTPRequest |{
-		happensBefore[req, res]
-		checkNotResponsed[req, res.current]
-		res.uri = req.uri
-		res.from = req.to
-		res.to = req.from
-
-		one t:HTTPTransaction | t.request = req and t.response = res
-	}
-}
-
-fact ReqAndResMaker{
-    no req:HTTPRequest | req.from in HTTPServer
-    no req:HTTPRequest | req.to in HTTPClient
-    no res:HTTPResponse | res.from in HTTPClient
-    no res:HTTPResponse | res.to in HTTPServer
 }
 
 //キャッシュの動作のイベントを定義
@@ -391,6 +175,7 @@ fact happenCacheReuse{
 	all reuse:CacheReuse | one store:CacheStore, req:HTTPRequest |{
 		//応答するリクエストに対する条件
 		happensBefore[req, reuse]
+		checkNotResponsed[req, reuse.current]
 		reuse.target.uri = req.uri
 		req.to.cache = store.happen or req.from.cache = store.happen
 
@@ -399,11 +184,10 @@ fact happenCacheReuse{
 		reuse.target = store.target
 
 		//格納レスポンスの送信先
-        reuse.to = req.from
+		reuse.to = req.from
 
-        //one t:HTTPTransaction | t.request = req and t.response = reuse.target
-        one t:HTTPTransaction | t.request = req and t.re_res = reuse
-
+		//HTTPTransactionに登録
+		one t:HTTPTransaction | t.request = req and t.re_res = reuse
 	}
 }
 
@@ -475,6 +259,7 @@ fact happenCacheVerification{
 	}
 }
 
+
 /***********************
 
 Headers
@@ -509,25 +294,57 @@ sig Maxage,NoCache,NoStore extends CacheOption{}
 sig OnlyIfCached extends RequestCacheOption{}
 sig Private,SMaxage extends ResponseCacheOption{}
 
-
 //どのリクエスト・レスポンスにも属さないヘッダは存在しない
 //各ヘッダは適切なリクエスト・レスポンスに属する
 //どのCacheControlヘッダにも属さないCacheOptiionは存在しない
 fact noOrphanedHeaders {
 	all h:HTTPRequestHeader|some req:HTTPRequest|h in req.headers
-    all h:HTTPResponseHeader|some resp:HTTPResponse|h in resp.headers
-    all h:HTTPGeneralHeader|some e:HTTPEvent | h in e.headers
-    all h:HTTPEntityHeader|some e:HTTPEvent | h in e.headers
+	all h:HTTPResponseHeader|some resp:HTTPResponse|h in resp.headers
+	all h:HTTPGeneralHeader|some e:HTTPEvent | h in e.headers
+	all h:HTTPEntityHeader|some e:HTTPEvent | h in e.headers
 	all c:CacheOption | c in CacheControlHeader.options
 	all c:RequestCacheOption | c in HTTPRequest.headers.options
-    all c:ResponseCacheOption | c in HTTPResponse.headers.options
+	all c:ResponseCacheOption | c in HTTPResponse.headers.options
 }
 
-/***********************
+//CacheControlHeaderのオプションに関する制限
+fact CCHeaderOption{
+	//for "no-cache"
+	all reuse:CacheReuse |{
+		(some op:NoCache | op in reuse.target.headers.options) implies {
+			one veri:CacheVerification | {
+				happensBefore[veri,reuse]
+				veri.target = reuse.target
+				veri.happen = reuse.happen
+			}
+		}
+	}
 
-Caches
+	//for "no-store"
+	no store:CacheStore | some op:NoStore | op in store.target.headers.options
 
-************************/
+	//for only-if-cached
+	all req:HTTPRequest | (some op:OnlyIfCached | op in req.headers.options) implies {
+		some reuse:CacheReuse | {
+			happensBefore[req, reuse]
+			reuse.target.uri = req.uri
+			reuse.to = req.from
+		}
+	}
+
+	//for "private"
+	no op:Private | some store:CacheStore | {
+		store.happen in PublicCache
+		op in store.target.headers.options
+	}
+}
+
+
+/****************************
+
+Cache
+
+****************************/
 abstract sig Cache{}
 sig PrivateCache extends Cache{}
 sig PublicCache extends Cache{}
@@ -540,14 +357,223 @@ fact noOrphanedCaches {
 
 //同じ端末に2つ以上のキャッシュは存在しない
 fact noMultipleCaches {
-	    all p:NetworkEndpoint | lone c:Cache | c in p.cache
+	all p:NetworkEndpoint | lone c:Cache | c in p.cache
 }
 
 fact PublicAndPrivate{
-    all pri:PrivateCache | pri in HTTPClient.cache
-    all pub:PublicCache | (pub in HTTPServer.cache) or (pub in HTTPIntermediary.cache)
+	all pri:PrivateCache | pri in HTTPClient.cache
+	all pub:PublicCache | (pub in HTTPServer.cache) or (pub in HTTPIntermediary.cache)
 }
 
+
+/***********************
+
+DNS
+
+************************/
+sig DNS{
+	parent : DNS + DNSRoot,	//ドメインの各部を所持
+	resolvesTo : set NetworkEndpoint
+}{
+// A DNS Label resolvesTo something
+//1つ以上のNetworkEndpointに接続
+	some resolvesTo
+}
+
+//定数:DNSroot
+one sig DNSRoot {}
+
+//全てのDNSについて、自身からたどれるparentの集合に自身は含まれない
+fact dnsIsAcyclic {
+	 all x: DNS | x !in x.^parent
+//	 all x:dns-dnsRoot | some x.parent
+}
+
+// s is  a subdomain of d
+//sのparentをたどるとdが存在する⇔sがdのサブドメインである
+pred isSubdomainOf[s: DNS, d: DNS]{
+   //e.g. .stanford.edu is a subdomain of .edu
+  d in s.*parent
+}
+
+//DNSから対象のPrincipalを取得
+fun getPrincipalFromDNS[dns : DNS]:Principal{
+	dnslabels.dns
+}
+
+//Originから対象のPrincipalを取得
+fun getPrincipalFromOrigin[o: Origin]:Principal{
+	getPrincipalFromDNS[o.dnslabel]
+}
+
+//異なるプリンシパルは同じDNS、同じサーバを持たない
+fact DNSIsDisjointAmongstPrincipals {
+	all disj p1,p2 : Principal | (no (p1.dnslabels & p2.dnslabels)) and ( no (p1.servers & p2.servers))
+//The servers disjointness is a problem for virtual hosts. We will replace it with disjoint amongst attackers and trusted people or something like that
+}
+
+// turn this on for intermediate checks
+// run show {} for 6
+
+/***********************
+
+Token
+
+************************/
+sig Time {}
+
+fact Traces{
+	all t:Time | one e:Event | t = e.current
+}
+
+abstract sig Token {}
+//秘匿情報 作成者、期限を持つ
+abstract sig Secret extends Token {
+	madeBy : Principal,
+	expiration : one Int,
+}
+
+sig Uri{}
+
+//使用されないURIは存在しない
+fact noOrphanedUri{
+	all u:Uri | some e:HTTPEvent | u = e.uri
+}
+
+sig URL {path:Path, host:Origin}
+
+//時系列に従ったモデルの考察
+// second.pre >= first.post
+
+abstract sig Method {}
+one sig GET extends Method {}
+one sig PUT  extends Method {}
+one sig POST extends Method {}
+one sig DELETE extends Method {}
+one sig OPTIONS extends Method {}
+
+fun safeMethods[]:set Method {
+	GET+OPTIONS
+}
+
+//レスポンスの状態コード
+abstract sig Status  {}
+abstract sig RedirectionStatus extends Status {}
+lone sig c200,c401 extends Status{}
+lone sig c301,c302,c303,c304,c305,c306,c307 extends RedirectionStatus {}
+
+
+/***********************
+
+HTTPServer Definitions
+
+***********************/
+lone sig ACTIVEATTACKER extends Principal{}
+
+//Passive Principals match their http / network parts
+abstract sig PassivePrincipal extends Principal{}{
+	servers in HTTPConformist
+}
+
+lone sig PASSIVEATTACKER extends PassivePrincipal{}
+sig WebPrincipal extends PassivePrincipal {
+  httpClients : set HTTPClient
+} { httpClients.owner = this }
+
+//HTTPAdherent so that it can make requests too
+lone sig WEBATTACKER extends WebPrincipal{}
+
+abstract sig NormalPrincipal extends WebPrincipal{} { 	dnslabels.resolvesTo in servers}
+lone sig GOOD extends NormalPrincipal{}
+lone sig SECURE extends NormalPrincipal{}
+lone sig ORIGINAWARE extends NormalPrincipal{}
+
+fact NonActiveFollowHTTPRules {
+// Old rule was :
+//	all t:HTTPTransaction | t.resp.from in HTTPServer implies t.req.host.server = t.resp.from
+// We rewrite to say HTTPAdherents cant spoof from part ... here we don't say anything about principal
+	all httpresponse:HTTPResponse | httpresponse.from in HTTPConformist implies httpresponse.from in httpresponse.host.dnslabel.resolvesTo
+}
+
+fact SecureIsHTTPSOnly {
+// Add to this the fact that transaction schema is consistent
+	all httpevent:HTTPEvent | httpevent.from in SECURE.servers implies httpevent.host.schema = HTTPS
+//	STS Requirement : all sc : ScriptContext | some (getPrincipalFromOrigin[sc.owner] & SECURE ) implies sc.transactions.req.host.schema=HTTPS
+}
+
+fact CSRFProtection {
+	all aResp:HTTPResponse | aResp.from in ORIGINAWARE.servers and aResp.statusCode=c200 implies {
+		(response.aResp).request.method in safeMethods or (
+		let theoriginchain = ((response.aResp).request.headers & OriginHeader).theorigin |
+			some theoriginchain and theoriginchain.dnslabel in ORIGINAWARE.dnslabels
+		)
+	}
+}
+
+fact NormalPrincipalsHaveNonTrivialDNSValues {
+// Normal Principals don't mess around with trivial DNS values
+   DNSRoot !in NormalPrincipal.dnslabels.parent
+}
+
+fact WebPrincipalsObeyTheHostHeader {
+	all aResp:HTTPResponse |
+		let p = servers.(aResp.from) |
+			p in WebPrincipal implies {
+				//the host header a NormalPrincipal Sets is always with the DNSLabels it owns
+				aResp.host.dnslabel in p.dnslabels
+				// it also makes sure that the from server is the same one that the dnslabel resolvesTo
+				aResp.from in aResp.host.dnslabel.resolvesTo
+
+				//additionally it responds to some request and keep semantics similar to the way Browsers keep them
+				some t:HTTPTransaction | t.response = aResp and t.request.host.dnslabel = t.response.host.dnslabel and t.request.host.schema = t.response.host.schema
+			}
+}
+
+fact NormalPrincipalsDontMakeRequests {
+	no aReq:HTTPRequest | aReq.from in NormalPrincipal.servers
+}
+
+
+/***********************************
+
+Client Definitions
+
+************************************/
+// Each user is associated with a set of network locations
+// from where they use their credentials
+pred isAuthorizedAccess[user:WebPrincipal, loc:NetworkEndpoint]{
+  loc in user.httpClients
+}
+
+/*fun smartClient[]:set Browser {
+  Firefox3 + InternetExplorer8
+}*/
+
+// Ideally want tp use the old Principals thing
+
+sig WWWAuthnHeader extends HTTPResponseHeader{}{
+  all resp:HTTPResponse| (some (WWWAuthnHeader & resp.headers)) => resp.statusCode=c401
+}
+
+
+// each user has at most one password
+sig UserPassword extends UserToken { }
+
+// sig AliceUserPassword extends UserPassword {} {id = Alice and madeBy in Alice }
+
+pred somePasswordExists {
+  some UserPassword //|p.madeBy in Alice
+}
+
+//run somePasswordExists for 8
+
+pred basicModelIsConsistent {
+  some ScriptContext
+  some t1:HTTPTransaction |{
+    some (t1.request.from & Browser ) and
+    some (t1.response)
+  }
+}
 
 // Browsers run a scriptContext
 sig ScriptContext {
@@ -575,6 +601,11 @@ sig LocationHeader extends HTTPResponseHeader {
 abstract sig RequestAPI{} // extends Event
 
 
+/************************
+
+HTTPTransaction
+
+************************/
 sig HTTPTransaction {
 	request : one HTTPRequest,
 	response : lone HTTPResponse,
@@ -589,8 +620,8 @@ sig HTTPTransaction {
 	}
 
 	some re_res implies {
-        happensBefore[request, re_res]
-    }
+		happensBefore[request, re_res]
+	}
 
 	request.host.schema = HTTPS implies some cert and some response
 	some cert implies request.host.schema = HTTPS
@@ -599,7 +630,7 @@ sig HTTPTransaction {
 fact limitHTTPTransaction{
 	all req:HTTPRequest | lone t:HTTPTransaction | t.request = req
 	no t:HTTPTransaction |{
-        some t.response and some t.re_res
+		some t.response and some t.re_res
 	}
 }
 
@@ -684,7 +715,9 @@ sig Certificate {
 }
 
 /****************************
+
 Cookie Stuff
+
 ****************************/
 // Currently the String type is taken but not yet implemented in Alloy
 // We will replace String1 with String when the latter is fully available in Alloy
@@ -805,128 +838,133 @@ fact HTTPTransactionsAreSane {
 //1 ACTIVEATTACKER, 1 WEBATTACKER, 1 ORIGINAWARE,
 //, 2  Origin,
 
+
+/****************************
+
+Test Code
+
+****************************/
 run test_reuse{
-    #HTTPClient = 1
-    #HTTPServer = 1
-    #HTTPIntermediary = 0
-    #PrivateCache = 1
-    #PublicCache = 0
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#HTTPIntermediary = 0
+	#PrivateCache = 1
+	#PublicCache = 0
 
 	#CacheReuse = 1
 
-    #IfModifiedSinceHeader = 0
-    #LastModifiedHeader = 0
-    #ETagHeader = 0
-    #DateHeader = 0
-    #ExpiresHeader = 0
-    //#AgeHeader = 0
-    //#CacheControlHeader = 0
+	#IfModifiedSinceHeader = 0
+	#LastModifiedHeader = 0
+	#IfNoneMatchHeader = 0
+	#ETagHeader = 0
+	#DateHeader = 0
+	#ExpiresHeader = 0
+	//#AgeHeader = 0
+	//#CacheControlHeader = 0
 
-    no h:HTTPHeader |{
-        h in HTTPRequest.headers
-    }
+	no h:HTTPHeader |{
+		h in HTTPRequest.headers
+	}
 } for 5
 
-
-
 run test_intermediary{
-    #HTTPClient = 1
-    #HTTPServer = 1
-    #HTTPIntermediary = 1
-    #Cache = 0
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#HTTPIntermediary = 1
+	#Cache = 0
 
-    #HTTPRequest = 2
-    #HTTPResponse = 2
+	#HTTPRequest = 2
+	#HTTPResponse = 2
 
-    #IfModifiedSinceHeader = 0
-    #LastModifiedHeader = 0
-    #IfNoneMatchHeader = 0
-    #ETagHeader = 0
-    #DateHeader = 0
-    #ExpiresHeader = 0
-    #AgeHeader = 0
-    //#CacheControlHeader = 0
+	#IfModifiedSinceHeader = 0
+	#LastModifiedHeader = 0
+	#IfNoneMatchHeader = 0
+	#ETagHeader = 0
+	#DateHeader = 0
+	#ExpiresHeader = 0
+	#AgeHeader = 0
+	//#CacheControlHeader = 0
 
-    no h:HTTPHeader |{
-        h in HTTPRequest.headers
-    }
+	no h:HTTPHeader |{
+		h in HTTPRequest.headers
+	}
 
-    all req:HTTPRequest | {
-        req.from in HTTPClient implies req.to in HTTPIntermediary
-        req.from in HTTPIntermediary implies req.to in HTTPServer
-    }
+	all req:HTTPRequest | {
+		req.from in HTTPClient implies req.to in HTTPIntermediary
+		req.from in HTTPIntermediary implies req.to in HTTPServer
+	}
 
-    all res:HTTPResponse | {
-        res.from in HTTPServer implies res.to in HTTPIntermediary
-        res.from in HTTPIntermediary implies res.to in HTTPClient
-    }
+	all res:HTTPResponse | {
+		res.from in HTTPServer implies res.to in HTTPIntermediary
+		res.from in HTTPIntermediary implies res.to in HTTPClient
+	}
 } for 4
 
-
 run cachemine{
-    #HTTPClient = 1
-    #HTTPServer = 1
-    #HTTPIntermediary = 1
-    #Cache = 1
-    #PrivateCache = 1
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#HTTPIntermediary = 1
+	#Cache = 1
+	#PrivateCache = 1
 
-    #HTTPRequest = 2
-    #HTTPResponse = 2
-    #CacheStore = 1
+	#HTTPRequest = 2
+	#HTTPResponse = 2
+	#CacheStore = 1
 
-    #IfModifiedSinceHeader = 0
-    #LastModifiedHeader = 0
-    #IfNoneMatchHeader = 0
-    #ETagHeader = 0
-    #DateHeader = 0
-    #ExpiresHeader = 0
-    //#AgeHeader = 2
-    //#CacheControlHeader = 2
+	#IfModifiedSinceHeader = 0
+	#LastModifiedHeader = 0
+	#IfNoneMatchHeader = 0
+	#ETagHeader = 0
+	#DateHeader = 0
+	#ExpiresHeader = 0
+	//#AgeHeader = 2
+	//#CacheControlHeader = 2
 
-    #Uri = 1
+	#Uri = 1
 
-    no h:HTTPHeader |{
-    	h in HTTPRequest.headers
-    }
+	no h:HTTPHeader |{
+		h in HTTPRequest.headers
+	}
 
-    all req:HTTPRequest | {
-        req.from in HTTPClient implies req.to in HTTPIntermediary
-        req.from in HTTPIntermediary implies req.to in HTTPServer
-    }
+	all req:HTTPRequest | {
+		req.from in HTTPClient implies req.to in HTTPIntermediary
+		req.from in HTTPIntermediary implies req.to in HTTPServer
+	}
 
-    all res:HTTPResponse | {
-        res.from in HTTPServer implies res.to in HTTPIntermediary
-        res.from in HTTPIntermediary implies res.to in HTTPClient
-    }
+	all res:HTTPResponse | {
+		res.from in HTTPServer implies res.to in HTTPIntermediary
+		res.from in HTTPIntermediary implies res.to in HTTPClient
+	}
 } for 5
 
 run bcp{
-    #HTTPClient = 1
-    #HTTPServer = 1
-    #HTTPIntermediary = 1
-    #PrivateCache = 1
-    #PublicCache = 0
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#HTTPIntermediary = 1
+	#PrivateCache = 1
+	#PublicCache = 0
 
-    #HTTPRequest = 3
-    #HTTPResponse = 2
-    #CacheStore = 1
-    #CacheReuse = 1
+	#HTTPRequest = 3
+	#HTTPResponse = 2
+	#CacheStore = 1
+	#CacheReuse = 1
 
-    #IfModifiedSinceHeader = 0
-    #LastModifiedHeader = 0
-    #IfNoneMatchHeader = 0
-    #ETagHeader = 0
-    #DateHeader = 0
-    #ExpiresHeader = 0
-    //#AgeHeader = 0
-    //#CacheControlHeader = 0
+	#IfModifiedSinceHeader = 0
+	#LastModifiedHeader = 0
+	#IfNoneMatchHeader = 0
+	#ETagHeader = 0
+	#DateHeader = 0
+	#ExpiresHeader = 0
+	//#AgeHeader = 0
+	//#CacheControlHeader = 0
 
-    all req:HTTPRequest | {
-        req.from in HTTPClient implies req.to in HTTPIntermediary
-        req.from in HTTPIntermediary implies req.to in HTTPServer
-    }
-    all res:HTTPResponse | {
-        res.from in HTTPServer implies res.to in HTTPIntermediary
-        res.from in HTTPIntermediary implies res.to in HTTPClient
-    }
+	all req:HTTPRequest | {
+		req.from in HTTPClient implies req.to in HTTPIntermediary
+		req.from in HTTPIntermediary implies req.to in HTTPServer
+	}
+
+	all res:HTTPResponse | {
+		res.from in HTTPServer implies res.to in HTTPIntermediary
+		res.from in HTTPIntermediary implies res.to in HTTPClient
+	}
 } for 7
