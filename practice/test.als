@@ -62,7 +62,8 @@ abstract sig NetworkEvent extends Event {
 
 abstract sig HTTPEvent extends NetworkEvent {
 	headers: set HTTPHeader,
-	uri: one Uri
+	uri: one Uri,
+	body :  set Token
 }
 
 sig HTTPRequest extends HTTPEvent {}
@@ -366,6 +367,8 @@ fact Traces{
 	all t:Time | one e:Event | t = e.current
 }
 
+abstract sig Token {}
+
 sig Uri{}
 
 //使用されないURIは存在しない
@@ -536,10 +539,15 @@ run bcp{
 	all req:HTTPRequest | {
 		req.from in HTTPClient implies req.to in HTTPIntermediary
 		req.from in HTTPIntermediary implies req.to in HTTPServer
+
+		#(req.body) = 0
 	}
 
 	all res:HTTPResponse | {
 		res.from in HTTPServer implies res.to in HTTPIntermediary
 		res.from in HTTPIntermediary implies res.to in HTTPClient
+
+		#(res.body) = 1
+		all disj res1, res2:HTTPResponse | no t:Token | t in res1.body and t in res2.body
 	}
 } for 7
