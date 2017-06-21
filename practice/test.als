@@ -12,7 +12,7 @@ sig Time {}
 
 //イベントが直後に発生する制限解除
 pred happensBefore[first:Event,second:Event]{
-	second.current in first.current.*next
+	second.current in first.current.next.*next
 }
 
 //ある時点(t)でリクエストに応答されていない
@@ -21,22 +21,26 @@ pred checkNotResponsed[req: HTTPRequest, t: Time]{
 		req.uri = res.uri
 
 		{
-			//req -> ... -> res -> ... -> t
+			//req -> ... -> res -> ... -> tの順でベントが発生
 			res.current in req.current.*next
-			t in res.current.*next
+			t in res.current.next.*next
 
 			res.to = req.from
+			res.from = req.to
 		}or{
 			some reuse:CacheReuse|{
-				//req -> ... -> reuse -> ... -> t
+				//req -> ... -> reuse -> ... -> tの順でベントが発生
 				reuse.current in req.current.*next
-				t in reuse.current.*next
+				t in reuse.current.next.*next
 
 				reuse.to = req.from
 				reuse.target = res
+				one p:NetworkEndpoint |{
+					p.cache = reuse.happen
+					(p = req.from) or (p = req.to)
+				}
 			}
 		}
-
 	}
 }
 
@@ -44,7 +48,47 @@ fact Traces{
 	all t:Time | one e:Event | t = e.current
 }
 
-sig NetworkEndpoint{cache : lone Cache}
+abstract sig NetworkEndpoint{cache : lone Cache}
+abstract sig HTTPConformist extends NetworkEndpoint{}
+sig HTTPServer extends HTTPConformist{}
+abstract sig HTTPClient extends HTTPConformist{}
+sig Browser extends HTTPClient {}
+
+abstract sig HTTPIntermediary extends HTTPConformist{}
+sig HTTPProxy extends HTTPIntermediary{}
+sig HTTPGateway extends HTTPIntermediary{}
+
+fact MoveOfIntermediary{
+	all e:HTTPEvent |{
+		e.from in HTTPIntermediary implies{	//e:中継者から送信されるイベント
+			one original:HTTPEvent |{	//original:中継者に向けて送信されたイベント
+				happensBefore[original, e]
+
+				e.from = original.to
+				e.uri = original.uri
+
+				//ヘッダの変更能力を付加
+				//e.headers = original.headers
+
+				original in HTTPRequest implies {
+					checkNotResponsed[original, e.current]
+					e in HTTPRequest
+				}
+				original in HTTPResponse implies {
+					e in HTTPResponse
+					e.statusCode = original.statusCode
+				}
+			}
+		}
+	}
+}
+
+fact ReqAndResMaker{
+	no req:HTTPRequest | req.from in HTTPServer
+	no req:HTTPRequest | req.to in HTTPClient
+	no res:HTTPResponse | res.from in HTTPClient
+	no res:HTTPResponse | res.to in HTTPServer
+}
 
 //----- イベント記述 -----
 abstract sig Event {
@@ -70,6 +114,10 @@ fact happenResponse{
 		happensBefore[req, res]
 		checkNotResponsed[req, res.current]
 		res.uri = req.uri
+		res.from = req.to
+		res.to = req.from
+
+		one t:HTTPTransaction | (t.request) = req and (t.response) = res
 	}
 }
 
@@ -84,9 +132,8 @@ sig CacheVerification extends CacheEvent {}
 //CacheStoreの発生条件
 fact happenCacheStore{
 	all store:CacheStore | one res:HTTPResponse | {
-		//レスポンスが直前にやりとりされている
+		//レスポンスが以前にやりとりされている
 		happensBefore[res, store]
-		//e.current = res.current.next
 		store.target = res
 		store.happen = res.to.cache
 
@@ -94,7 +141,8 @@ fact happenCacheStore{
 		store.happen in PrivateCache implies {	//for PrivateCache
 			(one op:Maxage | op in res.headers.options) or
 			(one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
-		}else{	//for PublicCache
+		}
+		store.happen in PublicCache implies{	//for PublicCache
 			(one op:Maxage | op in res.headers.options) or
 			(one op:SMaxage | op in res.headers.options) or
 			(one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
@@ -112,6 +160,7 @@ fact happenCacheReuse{
 		happensBefore[req, reuse]
 		checkNotResponsed[req, reuse.current]
 		reuse.target.uri = req.uri
+		req.to.cache = store.happen or req.from.cache = store.happen
 
 		//過去の格納イベントに対する条件
 		happensBefore[store, reuse]
@@ -119,6 +168,8 @@ fact happenCacheReuse{
 
 		//格納レスポンスの送信先
 		reuse.to = req.from
+
+		one t:HTTPTransaction | t.request = req and t.re_res = reuse
 	}
 }
 
@@ -167,18 +218,10 @@ fact happenCacheVerification{
 				res.to = req.from
 				(res.statusCode = c200) or (res.statusCode = c304)	//200:新しいレスポンスを使用, 304:レスポンスを再利用
 
-				//検証結果に対する動作（再利用 or 新レスポンス）
+				//検証結果に対する動作（新レスポンス or 再利用）
 				(res.statusCode = c200) implies
-					one reuse:CacheReuse | {
-						happensBefore[res, reuse]
-						//reuse.current = veri.current.next.next.next
-						reuse.target = veri.target
-					}
-
-				(res.statusCode = c304) implies
 					one res_result:HTTPResponse | {
 						happensBefore[res, res_result]
-						//res_result.current = veri.current.next.next.next
 						res_result.uri = res.uri
 						res_result.from = res.from
 						one req:HTTPRequest | {
@@ -186,8 +229,44 @@ fact happenCacheVerification{
 							res_result.to = req.from
 						}
 					}
+
+				(res.statusCode = c304) implies
+					one reuse:CacheReuse | {
+						happensBefore[res, reuse]
+						reuse.target = veri.target
+						reuse.to = req.from
+					}
 			}
 		}
+	}
+}
+
+sig HTTPTransaction {
+	request : one HTTPRequest,
+	response : lone HTTPResponse,
+	re_res : lone CacheReuse
+	//cert : lone Certificate,
+	//cause : lone HTTPTransaction + RequestAPI
+}{
+	some response implies {
+		//response can come from anyone but HTTP needs to say it is from correct person and hosts are the same, so schema is same
+		//resp.host = req.host
+		happensBefore[request,response]
+	}
+
+	some re_res implies {
+		happensBefore[request, re_res]
+	}
+
+	/*req.host.schema = HTTPS implies some cert and some resp
+	some cert implies req.host.schema = HTTPS*/
+
+}
+
+fact limitHTTPTransaction{
+	all req:HTTPRequest | lone t:HTTPTransaction | t.request = req
+	no t:HTTPTransaction |{
+		some t.response and some t.re_res
 	}
 }
 
@@ -226,19 +305,62 @@ sig DateHeader extends HTTPGeneralHeader{}
 sig ExpiresHeader extends HTTPEntityHeader{}
 
 abstract sig CacheOption{}
+abstract sig RequestCacheOption extends CacheOption{}
 abstract sig ResponseCacheOption extends CacheOption{}
-sig NoCache,NoStore,NoTransform extends CacheOption{}
-sig Maxage,SMaxage,Private,Public extends ResponseCacheOption{}
+//all
+/*
+sig Maxage,NoCache,NoStore,NoTransform extends CacheOption{}
+sig MaxStale,MinStale,OnlyIfCached extends RequestCacheOption{}
+sig MustRevalidate,Public,Private,ProxyRevalidate,SMaxage extends ResponseCacheOption{}
+*/
+//for simple model
+sig Maxage,NoCache,NoStore extends CacheOption{}
+sig OnlyIfCached extends RequestCacheOption{}
+sig Private,SMaxage extends ResponseCacheOption{}
 
 //どのリクエスト・レスポンスにも属さないヘッダは存在しない
 //各ヘッダは適切なリクエスト・レスポンスに属する
 //どのCacheControlヘッダにも属さないCacheOptiionは存在しない
 fact noOrphanedHeaders {
-	all h:HTTPRequestHeader|one req:HTTPRequest|h in req.headers
-	all h:HTTPResponseHeader|one resp:HTTPResponse|h in resp.headers
-	all h:HTTPGeneralHeader|one e:HTTPEvent | h in e.headers
-	all h:HTTPEntityHeader|one e:HTTPEvent | h in e.headers
+	all h:HTTPRequestHeader|some req:HTTPRequest|h in req.headers
+	all h:HTTPResponseHeader|some resp:HTTPResponse|h in resp.headers
+	all h:HTTPGeneralHeader|some e:HTTPEvent | h in e.headers
+	all h:HTTPEntityHeader|some e:HTTPEvent | h in e.headers
 	all c:CacheOption | c in CacheControlHeader.options
+	all c:RequestCacheOption | c in HTTPRequest.headers.options
+	all c:ResponseCacheOption | c in HTTPResponse.headers.options
+}
+
+//CacheControlHeaderのオプションに関する制限
+fact CCHeaderOption{
+	//for "no-cache"
+	all reuse:CacheReuse |{
+		(some op:NoCache | op in reuse.target.headers.options) implies {
+			one veri:CacheVerification | {
+				happensBefore[veri,reuse]
+				veri.target = reuse.target
+				veri.happen = reuse.happen
+			}
+		}
+	}
+
+	//for "no-store"
+	no store:CacheStore | some op:NoStore | op in store.target.headers.options
+
+	//for only-if-cached
+	all req:HTTPRequest | (some op:OnlyIfCached | op in req.headers.options) implies {
+		some reuse:CacheReuse | {
+			happensBefore[req, reuse]
+			reuse.target.uri = req.uri
+			reuse.to = req.from
+		}
+	}
+
+	//for "private"
+	no op:Private | some store:CacheStore | {
+		store.happen in PublicCache
+		op in store.target.headers.options
+	}
 }
 
 /****************************
@@ -259,20 +381,135 @@ fact noOrphanedCaches {
 
 //同じ端末に2つ以上のキャッシュは存在しない
 fact noMultipleCaches {
-	no disj e1, e2:NetworkEndpoint | e1.cache = e2.cache
+	all p:NetworkEndpoint | lone c:Cache | c in p.cache
 }
 
-run {
-	#PrivateCache = 0
-	#PublicCache = 1
-	#CacheStore = 1
-	//#CacheReuse = 1
-	#CacheVerification = 1
+fact PublicAndPrivate{
+	all pri:PrivateCache | pri in HTTPClient.cache
+	all pub:PublicCache | (pub in HTTPServer.cache) or (pub in HTTPIntermediary.cache)
+}
+
+run test_intermediary{
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#HTTPIntermediary = 1
+	#Cache = 0
+
+	#HTTPRequest = 2
+	#HTTPResponse = 2
 
 	#IfModifiedSinceHeader = 0
 	#LastModifiedHeader = 0
-	//#IfNoneMatchHeader = 0
-	//#ETagHeader = 0
+	#IfNoneMatchHeader = 0
+	#ETagHeader = 0
 	#DateHeader = 0
 	#ExpiresHeader = 0
-} for 8
+	#AgeHeader = 0
+	//#CacheControlHeader = 0
+
+	no h:HTTPHeader |{
+		h in HTTPRequest.headers
+	}
+
+	all req:HTTPRequest | {
+		req.from in HTTPClient implies req.to in HTTPIntermediary
+		req.from in HTTPIntermediary implies req.to in HTTPServer
+	}
+
+	all res:HTTPResponse | {
+		res.from in HTTPServer implies res.to in HTTPIntermediary
+		res.from in HTTPIntermediary implies res.to in HTTPClient
+	}
+} for 4
+
+run cachemine{
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#HTTPIntermediary = 1
+	#Cache = 1
+	#PrivateCache = 1
+
+	#HTTPRequest = 2
+	#HTTPResponse = 2
+	#CacheStore = 1
+
+	#IfModifiedSinceHeader = 0
+	#LastModifiedHeader = 0
+	#IfNoneMatchHeader = 0
+	#ETagHeader = 0
+	#DateHeader = 0
+	#ExpiresHeader = 0
+	//#AgeHeader = 2
+	//#CacheControlHeader = 2
+
+	#Uri = 1
+
+	no h:HTTPHeader |{
+		h in HTTPRequest.headers
+	}
+
+	all req:HTTPRequest | {
+		req.from in HTTPClient implies req.to in HTTPIntermediary
+		req.from in HTTPIntermediary implies req.to in HTTPServer
+	}
+
+	all res:HTTPResponse | {
+		res.from in HTTPServer implies res.to in HTTPIntermediary
+		res.from in HTTPIntermediary implies res.to in HTTPClient
+	}
+} for 5
+
+run bcp{
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#HTTPIntermediary = 1
+	#PrivateCache = 1
+	#PublicCache = 0
+
+	#HTTPRequest = 3
+	#HTTPResponse = 2
+	#CacheStore = 1
+	#CacheReuse = 1
+
+	#IfModifiedSinceHeader = 0
+	#LastModifiedHeader = 0
+	#IfNoneMatchHeader = 0
+	#ETagHeader = 0
+	#DateHeader = 0
+	#ExpiresHeader = 0
+	//#AgeHeader = 0
+	//#CacheControlHeader = 0
+
+	all req:HTTPRequest | {
+		req.from in HTTPClient implies req.to in HTTPIntermediary
+		req.from in HTTPIntermediary implies req.to in HTTPServer
+	}
+
+	all res:HTTPResponse | {
+		res.from in HTTPServer implies res.to in HTTPIntermediary
+		res.from in HTTPIntermediary implies res.to in HTTPClient
+	}
+} for 7
+
+run test_reuse{
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#HTTPIntermediary = 0
+	#PrivateCache = 1
+	#PublicCache = 0
+
+	#CacheReuse = 1
+
+	#IfModifiedSinceHeader = 0
+	#LastModifiedHeader = 0
+	#IfNoneMatchHeader = 0
+	#ETagHeader = 0
+	#DateHeader = 0
+	#ExpiresHeader = 0
+	//#AgeHeader = 0
+	//#CacheControlHeader = 0
+
+	no h:HTTPHeader |{
+		h in HTTPRequest.headers
+	}
+} for 5
