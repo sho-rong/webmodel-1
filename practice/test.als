@@ -369,6 +369,10 @@ fact Traces{
 
 abstract sig Token {}
 
+fact noOrphanedToken{
+	all t:Token | some e:HTTPEvent | t in e.body
+}
+
 sig Uri{}
 
 //使用されないURIは存在しない
