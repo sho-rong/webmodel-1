@@ -77,7 +77,8 @@ abstract sig NetworkEvent extends Event {
 abstract sig HTTPEvent extends NetworkEvent {
 	headers: set HTTPHeader,
 	host : Origin,
-	uri: one Uri
+	uri: one Uri,
+	body :  set Token
 }
 
 sig HTTPRequest extends HTTPEvent {
@@ -85,7 +86,6 @@ sig HTTPRequest extends HTTPEvent {
 	method: Method,
 	path : Path,
 	queryString : set attributeNameValuePair,  // URL query string parameters
-	body :  set Token
 }
 sig HTTPResponse extends HTTPEvent {statusCode: one Status}
 
@@ -483,6 +483,9 @@ sig WebPrincipal extends PassivePrincipal {
 //HTTPAdherent so that it can make requests too
 lone sig WEBATTACKER extends WebPrincipal{}
 
+lone sig Alice extends WebPrincipal {}
+lone sig Mallory extends WEBATTACKER {}
+
 abstract sig NormalPrincipal extends WebPrincipal{} { 	dnslabels.resolvesTo in servers}
 lone sig GOOD extends NormalPrincipal{}
 lone sig SECURE extends NormalPrincipal{}
@@ -686,9 +689,6 @@ sig INDEX,HOME,SENSITIVE, PUBLIC, LOGIN,LOGOUT,REDIRECT extends Path{}
 sig PATH_TO_COMPROMISE extends SENSITIVE {}
 
 // sig User extends WebPrincipal { }
-
-lone sig Alice extends WebPrincipal {}
-lone sig Mallory extends WEBATTACKER {}
 
 sig Origin {
 //	port: Port,

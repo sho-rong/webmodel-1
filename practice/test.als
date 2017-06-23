@@ -11,7 +11,9 @@ abstract sig Principal {
 abstract sig NetworkEndpoint{cache : lone Cache}
 abstract sig HTTPConformist extends NetworkEndpoint{}
 sig HTTPServer extends HTTPConformist{}
-abstract sig HTTPClient extends HTTPConformist{}
+abstract sig HTTPClient extends HTTPConformist{
+  owner:WebPrincipal // owner of the HTTPClient process
+}
 sig Browser extends HTTPClient {}
 abstract sig HTTPIntermediary extends HTTPConformist{}
 sig HTTPProxy extends HTTPIntermediary{}
@@ -389,6 +391,27 @@ lone sig c304 extends RedirectionStatus {}
 lone sig c200,c401 extends Status{}
 lone sig c301,c302,c303,c304,c305,c306,c307 extends RedirectionStatus {}
 */
+
+
+/***********************
+
+HTTPServer Definitions
+
+***********************/
+lone sig ACTIVEATTACKER extends Principal{}
+
+abstract sig PassivePrincipal extends Principal{}{
+	servers in HTTPConformist
+}
+
+sig WebPrincipal extends PassivePrincipal {
+  httpClients : set HTTPClient
+} { httpClients.owner = this }
+
+lone sig WEBATTACKER extends WebPrincipal{}
+
+lone sig Alice extends WebPrincipal {}
+lone sig Mallory extends WEBATTACKER {}
 
 
 /***********************
