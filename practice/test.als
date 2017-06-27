@@ -578,3 +578,20 @@ run bcp{
 		all disj res1, res2:HTTPResponse | no t:Token | t in res1.body and t in res2.body
 	}
 } for 7
+
+run test_alice{
+	one HTTPClient
+	one HTTPServer
+	no HTTPIntermediary
+	no Cache
+
+	one HTTPRequest
+	one HTTPResponse
+
+	no HTTPHeader
+
+	#Principal = 1
+	//one Alice
+	one Mallory
+	no point:NetworkEndpoint | point in Mallory.httpClients and point in Browser
+} for 2
