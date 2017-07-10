@@ -5,11 +5,8 @@ open util/ordering[Time]
 Network Component
 
 ***********************/
-abstract sig Principal {
-	servers : set NetworkEndpoint,
-}
-abstract sig NetworkEndpoint{cache : lone Cache}
-abstract sig HTTPConformist extends NetworkEndpoint{}
+abstract sig NetworkEndpoint{}
+abstract sig HTTPConformist extends NetworkEndpoint{cache : lone Cache}
 sig HTTPServer extends HTTPConformist{}
 abstract sig HTTPClient extends HTTPConformist{
   owner:WebPrincipal // owner of the HTTPClient process
@@ -395,16 +392,20 @@ lone sig c301,c302,c303,c304,c305,c306,c307 extends RedirectionStatus {}
 
 /***********************
 
-HTTPServer Definitions
+Network Character
 
 ***********************/
-lone sig ACTIVEATTACKER extends Principal{}
+abstract sig Principal {
+	servers : set NetworkEndpoint,
+}
+lone sig ACTIVEATTACKER extends Principal{}	//GadgetAttacker
 
 abstract sig PassivePrincipal extends Principal{}{
 	servers in HTTPConformist
 }
 
-sig WebPrincipal extends PassivePrincipal {
+lone sig PASSIVEATTACKER extends PassivePrincipal{}
+abstract sig WebPrincipal extends PassivePrincipal {
   httpClients : set HTTPClient
 } { httpClients.owner = this }
 
@@ -590,8 +591,8 @@ run test_alice{
 
 	no HTTPHeader
 
-	#Principal = 1
-	//one Alice
-	one Mallory
-	no point:NetworkEndpoint | point in Mallory.httpClients and point in Browser
+	#Principal = 2
+	#Alice = 1
+	#WEBATTACKER = 1
+	//no point:NetworkEndpoint | point in Mallory.servers and point in Browser
 } for 2
