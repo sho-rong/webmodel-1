@@ -398,21 +398,21 @@ Network Character
 abstract sig Principal {
 	servers : set NetworkEndpoint,
 }
-lone sig ACTIVEATTACKER extends Principal{}	//GadgetAttacker
 
 abstract sig PassivePrincipal extends Principal{}{
 	servers in HTTPConformist
 }
 
-lone sig PASSIVEATTACKER extends PassivePrincipal{}
 abstract sig WebPrincipal extends PassivePrincipal {
-  httpClients : set HTTPClient
+ 	httpClients : set HTTPClient
 } { httpClients.owner = this }
 
-lone sig WEBATTACKER extends WebPrincipal{}
+sig ACTIVEATTACKER extends Principal{}	//GadgetAttacker
+sig PASSIVEATTACKER extends PassivePrincipal{}	//WebAttacker
+sig WEBATTACKER extends WebPrincipal{}	//NetworkAttacker
 
-lone sig Alice extends WebPrincipal {}
-lone sig Mallory extends WEBATTACKER {}
+sig Alice extends WebPrincipal {}
+sig Mallory extends WEBATTACKER {}
 
 
 /***********************
@@ -581,15 +581,15 @@ run bcp{
 } for 7
 
 run test_alice{
-	one HTTPClient
-	one HTTPServer
-	no HTTPIntermediary
-	no Cache
+	//one HTTPClient
+	//one HTTPServer
+	//no HTTPIntermediary
+	//no Cache
 
-	one HTTPRequest
-	one HTTPResponse
+	//one HTTPRequest
+	//one HTTPResponse
 
-	no HTTPHeader
+	//no HTTPHeader
 
 	#Principal = 2
 	#Alice = 1
