@@ -61,7 +61,9 @@ abstract sig PassivePrincipal extends Principal{}{
 	servers in HTTPConformist
 }
 
-abstract sig WebPrincipal extends PassivePrincipal {}
+abstract sig WebPrincipal extends PassivePrincipal {
+	httpClients : set HTTPClient
+} { httpClients.owner = this }
 
 sig ACTIVEATTACKER extends Principal{}	//GadgetAttacker
 sig PASSIVEATTACKER extends PassivePrincipal{}	//WebAttacker
@@ -76,15 +78,16 @@ Test Code
 
 ****************************/
 run test_alice{
-	//one HTTPRequest
-	//one HTTPResponse
+	one HTTPRequest
+	one HTTPResponse
 
-	one HTTPClient
-	one HTTPServer
+	some HTTPClient
+	some HTTPServer
 
 	one Alice
 	one Mallory
 
 	all s:HTTPServer | s in Mallory.servers
 	all c:HTTPClient | c in Alice.servers
-} for 2
+} for 2 but exactly 3 NetworkEndpoint
+//} for 2

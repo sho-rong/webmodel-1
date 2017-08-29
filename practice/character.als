@@ -39,14 +39,12 @@ fact MoveOfIntermediary{
 	}
 }
 
-/*
 fact ReqAndResMaker{
 	no req:HTTPRequest | req.from in HTTPServer
 	no req:HTTPRequest | req.to in HTTPClient
 	no res:HTTPResponse | res.from in HTTPClient
 	no res:HTTPResponse | res.to in HTTPServer
 }
-*/
 
 /***********************
 
@@ -442,7 +440,17 @@ Test Code
 
 ****************************/
 run test_alice{
+	one HTTPRequest
+	one HTTPResponse
 	no HTTPHeader
+
+	some HTTPClient
+	some HTTPServer
+	no Cache
+
 	one Alice
 	one Mallory
-} for 2
+
+	all s:HTTPServer | s in Mallory.servers
+	all c:HTTPClient | c in Alice.servers
+} for 2 but exactly 3 NetworkEndpoint
