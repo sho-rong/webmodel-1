@@ -392,9 +392,16 @@ abstract sig PassivePrincipal extends Principal{}{
 	servers in HTTPConformist
 }
 
+/*
 abstract sig WebPrincipal extends PassivePrincipal {
  	httpClients : set HTTPClient
 } { httpClients.owner = this }
+*/
+abstract sig WebPrincipal extends PassivePrincipal {}{
+	all client:HTTPClient |
+		client in servers implies servers.owner = this
+}
+
 
 sig ACTIVEATTACKER extends Principal{}	//GadgetAttacker
 sig PASSIVEATTACKER extends PassivePrincipal{}	//WebAttacker
@@ -439,7 +446,7 @@ fact limitHTTPTransaction{
 Test Code
 
 ****************************/
-run test_alice{
+run test_alice_mallory{
 	one HTTPRequest
 	one HTTPResponse
 	no HTTPHeader
@@ -454,3 +461,40 @@ run test_alice{
 	all s:HTTPServer | s in Mallory.servers
 	all c:HTTPClient | c in Alice.servers
 } for 2 but exactly 3 NetworkEndpoint
+
+run test_proxy{
+	#HTTPRequest = 2
+	#HTTPResponse = 2
+	no HTTPHeader
+
+	one HTTPClient
+	one HTTPServer
+	one HTTPProxy
+	#NetworkEndpoint = 3
+	no Cache
+
+	#Alice = 2
+	one Mallory
+	#Principal = 3
+
+	HTTPClient.owner in Alice
+	HTTPClient in Alice.servers
+	HTTPServer in Alice.servers
+	HTTPProxy = Mallory.servers
+	all e:NetworkEndpoint | one p:Principal | e in p.servers
+
+	all req:HTTPRequest | {
+		req.from in HTTPClient implies req.to in HTTPIntermediary
+		req.from in HTTPIntermediary implies req.to in HTTPServer
+
+		#(req.body) = 0
+	}
+
+	all res:HTTPResponse | {
+		res.from in HTTPServer implies res.to in HTTPIntermediary
+		res.from in HTTPIntermediary implies res.to in HTTPClient
+
+		#(res.body) = 1
+		all disj res1, res2:HTTPResponse | no t:Token | t in res1.body and t in res2.body
+	}
+} for 4
