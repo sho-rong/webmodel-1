@@ -67,43 +67,45 @@ abstract sig HTTPEvent extends NetworkEvent {
 
 sig HTTPRequest extends HTTPEvent {}
 sig HTTPResponse extends HTTPEvent {statusCode: one Status}
-sig CacheReuse extends NetworkEvent{reuse: one HTTPResponse}
+sig CacheReuse extends NetworkEvent{target: one HTTPResponse}
 
 //HTTPResponseの発生条件
 fact happenResponse{
 	all res:HTTPResponse | one req:HTTPRequest |{
+		//レスポンスに対する条件
 		happensBefore[req, res]
 		checkNotResponsed[req, res.current]
 		res.uri = req.uri
 		res.from = req.to
 		res.to = req.from
 
+		//HTTPTransactionに登録
 		one t:HTTPTransaction | t.request = req and t.response = res
 	}
 }
 
-/*
 //CacheReuseの発生条件
 fact happenCacheReuse{
-	all reuse:CacheReuse | req:HTTPRequest |{
+	all reuse:CacheReuse | one req:HTTPRequest |{
 		//応答するリクエストに対する条件
 		happensBefore[req, reuse]
 		checkNotResponsed[req, reuse.current]
-		reuse.target.uri = req.uri
-		req.to.cache = store.happen or req.from.cache = store.happen
+		req.uri = reuse.target.uri
+		req.from = reuse.to
+		reuse.from in req.to + req.from
 
-		//過去の格納イベントに対する条件
-		happensBefore[store, reuse]
-		reuse.target = store.target
-
-		//格納レスポンスの送信先
-		reuse.to = req.from
-
-		//HTTPTransactionに登録
-		one t:HTTPTransaction | t.request = req and t.re_res = reuse
+		//HTTPTransactionに登録 ＆ 再利用レスポンスが先にストアされている
+		one t:HTTPTransaction | {
+			t.request = req
+			t.re_res = reuse
+			one bs:CacheState | {
+				bs in t.beforeState
+				bs.cache = reuse.from.cache
+				reuse.target in bs.store
+			}
+		}
 	}
 }
-*/
 
 //firstがsecondよりも前に発生する
 pred happensBefore[first:Event,second:Event]{
@@ -255,6 +257,7 @@ sig CacheTransaction extends HTTPTransaction{
 	beforeState.cache = request.from.cache + request.to.cache
 	afterState.cache = request.from.cache + request.to.cache
 
+	//HTTPResponseが存在するTransactionの場合
 	some response implies {
 		all before,after:CacheState | {
 			before.cache = after.cache
@@ -265,6 +268,7 @@ sig CacheTransaction extends HTTPTransaction{
 		}
 	}
 
+	//CacheReuseが存在するTransactionの場合
 	some re_res implies{
 		all before,after:CacheState | {
 			before.cache = after.cache
@@ -274,12 +278,21 @@ sig CacheTransaction extends HTTPTransaction{
 			after.store = before.store
 		}
 	}
+}
 
-	all bs:CacheState | bs in beforeState implies{
-		all p:NetworkEndpoint | p.cache in bs.cache implies {
-			one cs:CacheState | checkNewestCacheState[cs, p, request.current] implies bs.store in cs.store
-		}
-	}
+fact limitBeforeState{
+	all tr:CacheTransaction |
+		all disj before,pre:CacheState |
+			{
+				before in tr.beforeState
+				pre.cache = before.cache
+				one tr':CacheTransaction |{
+					pre in (tr'.afterState)
+					tr.request.current in tr'.response.current.*next
+				}
+			}implies
+				checkNewestCacheState[pre, tr.request.current] implies
+					before.store in pre.store
 }
 
 sig CacheState{
@@ -291,20 +304,19 @@ fact noOrphanedCacheState{
 	all cs:CacheState | cs in CacheTransaction.beforeState + CacheTransaction.afterState
 }
 
-pred checkNewestCacheState[cs:CacheState, p:NetworkEndpoint, t:Time]{
-	one res:HTTPResponse | no res':HTTPResponse |{
-		t in res.current.*next
-		t in res'.current.*next
+pred checkNewestCacheState[pre:CacheState, t:Time]{
+	all cs:CacheState |
+		{
+			cs.cache = pre.cache
+			cs in CacheTransaction.afterState
+			one tr:CacheTransaction | cs in tr.afterState implies t in tr.response.current.next.*next
+		}implies
+			one tr:CacheTransaction |{
+				cs in tr.afterState
+				t in tr.response.current.*next
+			}
 
-		p in res.from + res.to
-		p in res'.from + res'.to
-		happensBefore[res, res']
 
-		one tr:CacheTransaction |{
-			tr.response = res
-			cs in tr.afterState
-		}
-	}
 }
 
 /***********************
@@ -383,3 +395,14 @@ run test_store{
 	#CacheTransaction = 1
 	#CacheState = 2
 } for 2
+
+run test_reuse{
+	#HTTPClient = 1
+	#HTTPServer = 1
+
+	#HTTPRequest = 2
+	#HTTPResponse = 1
+	#CacheReuse = 1
+
+	#CacheTransaction = 2
+} for 4
