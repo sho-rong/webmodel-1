@@ -82,6 +82,29 @@ fact happenResponse{
 	}
 }
 
+/*
+//CacheReuseの発生条件
+fact happenCacheReuse{
+	all reuse:CacheReuse | req:HTTPRequest |{
+		//応答するリクエストに対する条件
+		happensBefore[req, reuse]
+		checkNotResponsed[req, reuse.current]
+		reuse.target.uri = req.uri
+		req.to.cache = store.happen or req.from.cache = store.happen
+
+		//過去の格納イベントに対する条件
+		happensBefore[store, reuse]
+		reuse.target = store.target
+
+		//格納レスポンスの送信先
+		reuse.to = req.from
+
+		//HTTPTransactionに登録
+		one t:HTTPTransaction | t.request = req and t.re_res = reuse
+	}
+}
+*/
+
 //firstがsecondよりも前に発生する
 pred happensBefore[first:Event,second:Event]{
 	second.current in first.current.next.*next
@@ -116,30 +139,6 @@ pred checkNotResponsed[req: HTTPRequest, t: Time]{
 		}
 	}*/
 }
-
-/*
-//CacheReuseの発生条件
-fact happenCacheReuse{
-	all reuse:CacheReuse | one store:CacheStore, req:HTTPRequest |{
-		//応答するリクエストに対する条件
-		happensBefore[req, reuse]
-		checkNotResponsed[req, reuse.current]
-		reuse.target.uri = req.uri
-		req.to.cache = store.happen or req.from.cache = store.happen
-
-		//過去の格納イベントに対する条件
-		happensBefore[store, reuse]
-		reuse.target = store.target
-
-		//格納レスポンスの送信先
-		reuse.to = req.from
-
-		//HTTPTransactionに登録
-		one t:HTTPTransaction | t.request = req and t.re_res = reuse
-	}
-}
-*/
-
 
 /***********************
 
@@ -256,14 +255,25 @@ sig CacheTransaction extends HTTPTransaction{
 	beforeState.cache = request.from.cache + request.to.cache
 	afterState.cache = request.from.cache + request.to.cache
 
-	all before,after:CacheState | {
-		before.cache = after.cache
-		before in beforeState
-		after in afterState
-	}implies{
-		after.store in before.store + response
+	some response implies {
+		all before,after:CacheState | {
+			before.cache = after.cache
+			before in beforeState
+			after in afterState
+		}implies{
+			after.store in before.store + response
+		}
 	}
 
+	some re_res implies{
+		all before,after:CacheState | {
+			before.cache = after.cache
+			before in beforeState
+			after in afterState
+		}implies{
+			after.store = before.store
+		}
+	}
 
 	all bs:CacheState | bs in beforeState implies{
 		all p:NetworkEndpoint | p.cache in bs.cache implies {
@@ -352,6 +362,7 @@ sig HTTPTransaction {
 
 fact limitHTTPTransaction{
 	all req:HTTPRequest | lone t:HTTPTransaction | t.request = req
+	all reuse:CacheReuse | lone t:HTTPTransaction | t.re_res = reuse
 	no t:HTTPTransaction |{
 		some t.response and some t.re_res
 	}
