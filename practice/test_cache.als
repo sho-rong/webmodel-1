@@ -250,25 +250,25 @@ sig CacheTransaction extends HTTPTransaction{
 	beforeState: set CacheState,
 	afterState: set CacheState
 }{
+	#beforeState <= 2
+	#afterState <= 2
+
 	beforeState.cache = request.from.cache + request.to.cache
 	afterState.cache = request.from.cache + request.to.cache
 
 	all before,after:CacheState | {
-			before.cache = after.cache
-			before in beforeState
-			after in afterState
-		}implies{
-			after.store in before.store + response
-		}
+		before.cache = after.cache
+		before in beforeState
+		after in afterState
+	}implies{
+		after.store in before.store + response
 	}
 
 
-	one res:HTTPResponse | no res':HTTPResponse |{
-		request.from in res.from + res.to
-		request.from in res'.from + res'.to
-		happensBefore[res, res']
-	}implies one tr:CacheTransaction | tr.response = res implies{
-
+	all bs:CacheState | bs in beforeState implies{
+		all p:NetworkEndpoint | p.cache in bs.cache implies {
+			one cs:CacheState | checkNewestCacheState[cs, p, request.current] implies bs.store in cs.store
+		}
 	}
 }
 
@@ -281,8 +281,20 @@ fact noOrphanedCacheState{
 	all cs:CacheState | cs in CacheTransaction.beforeState + CacheTransaction.afterState
 }
 
-fun getNewestCacheState[p:NetworkEndpoint, t:Time]:CacheState{
-	
+pred checkNewestCacheState[cs:CacheState, p:NetworkEndpoint, t:Time]{
+	one res:HTTPResponse | no res':HTTPResponse |{
+		t in res.current.*next
+		t in res'.current.*next
+
+		p in res.from + res.to
+		p in res'.from + res'.to
+		happensBefore[res, res']
+
+		one tr:CacheTransaction |{
+			tr.response = res
+			cs in tr.afterState
+		}
+	}
 }
 
 /***********************
@@ -350,7 +362,7 @@ fact limitHTTPTransaction{
 Test Code
 
 ****************************/
-run test{
+run test_store{
 	#HTTPClient = 1
 	#HTTPServer = 1
 
@@ -358,4 +370,5 @@ run test{
 	#HTTPResponse = 1
 
 	#CacheTransaction = 1
+	#CacheState = 2
 } for 2
