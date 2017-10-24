@@ -2,9 +2,9 @@ open test_parts
 open util/ordering[Time]
 
 fact{
-/*	all disj pre,post: State |
+	all disj pre,post: State |
 		justpre[pre, post] implies
-			post.p = pre*/
+			post.p = pre
 
 	all s:State |
 		firstState[s] implies
@@ -20,15 +20,17 @@ pred justpre[pre:State, post:State]{
 			pre in tr.after
 			post in tr'.before
 		}implies
-			no s:State |
+			all s:State |
 				{
 					s in Transaction.after
 					s.cache = post.cache
+				}implies
 					all tr'':Transaction |
 						s in tr''.after implies
-							tr'.req.current in tr''.res.current.*next implies	// s => post
-								tr''.res.current in tr.res.current.*next	//pre => s
-				}
+							{
+								tr.res.current in tr''.res.current.*next	//s => pre
+								tr''.res.current in tr'.req.current.*next	//post => s
+							}
 }
 
 pred firstState[s:State]{
@@ -44,14 +46,12 @@ pred firstState[s:State]{
 					s in tr.before
 					s' in tr'.after
 				}implies
-					tr'.req.current in tr.res.current.*next	//s => s'
+					tr'.res.current in tr.req.current.*next	//s => s'
 }
-
 
 run {
 	one Cache
 	no Token
 
-	some State.p
-	#State = 4
+	some s:State | s.p = s
 } for 4
