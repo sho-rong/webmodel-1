@@ -282,17 +282,24 @@ sig CacheTransaction extends HTTPTransaction{
 
 fact limitBeforeState{
 	all tr:CacheTransaction |
+	{
 		all disj before,pre:CacheState |
-			{
-				before in tr.beforeState
-				pre.cache = before.cache
-				one tr':CacheTransaction |{
+		{
+			before in tr.beforeState
+			pre.cache = before.cache
+			all tr':CacheTransaction |
+				{
 					pre in (tr'.afterState)
 					tr.request.current in tr'.response.current.*next
-				}
-			}implies
-				checkNewestCacheState[pre, tr.request.current] implies
-					before.store in pre.store
+				}implies
+					checkNewestCacheState[pre, tr'.response.current, tr.response.current] implies before.store in pre.store + tr.response
+		}
+
+		all before:CacheState |
+			before in tr.beforeState implies
+				checkFirstCacheState[before, tr.request.current] implies
+					no before.store
+	}
 }
 
 sig CacheState{
@@ -304,20 +311,28 @@ fact noOrphanedCacheState{
 	all cs:CacheState | cs in CacheTransaction.beforeState + CacheTransaction.afterState
 }
 
-pred checkNewestCacheState[pre:CacheState, t:Time]{
+//時刻t_preのCacheState preが、時刻tにおいて最新か確認
+pred checkNewestCacheState[pre:CacheState, t_pre:Time, t:Time]{
 	all cs:CacheState |
 		{
 			cs.cache = pre.cache
 			cs in CacheTransaction.afterState
-			one tr:CacheTransaction | cs in tr.afterState implies t in tr.response.current.next.*next
-		}implies
-			one tr:CacheTransaction |{
-				cs in tr.afterState
-				t in tr.response.current.*next
-			}
-
-
+			one tr:CacheTransaction |
+				cs in tr.afterState implies
+					t in tr.response.current.*next implies
+						t_pre in tr.response.current.*next
+		}
 }
+
+pred checkFirstCacheState[cs:CacheState, t:Time]{
+	no cs':CacheState |
+		{
+			cs.cache = cs'.cache
+			cs' in CacheTransaction.afterState
+			all tr:CacheTransaction | cs' in tr.afterState implies t in tr.response.current.next.*next
+		}
+}
+
 
 /***********************
 
@@ -399,6 +414,8 @@ run test_store{
 run test_reuse{
 	#HTTPClient = 1
 	#HTTPServer = 1
+	#Cache = 1
+	#PrivateCache = 1
 
 	#HTTPRequest = 2
 	#HTTPResponse = 1
