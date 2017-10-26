@@ -292,12 +292,12 @@ fact limitBeforeState{
 					pre in (tr'.afterState)
 					tr.request.current in tr'.response.current.*next
 				}implies
-					checkNewestCacheState[pre, tr'.response.current, tr.response.current] implies before.store in pre.store + tr.response
+					checkNewestCacheState[pre, before] implies before.store in pre.store + tr.response
 		}
 
 		all before:CacheState |
 			before in tr.beforeState implies
-				checkFirstCacheState[before, tr.request.current] implies
+				checkFirstCacheState[before] implies
 					no before.store
 	}
 }
@@ -312,25 +312,43 @@ fact noOrphanedCacheState{
 }
 
 //時刻t_preのCacheState preが、時刻tにおいて最新か確認
-pred checkNewestCacheState[pre:CacheState, t_pre:Time, t:Time]{
-	all cs:CacheState |
+pred checkNewestCacheState[pre:CacheState, post:CacheState]{
+	pre in CacheTransaction.afterState
+	post in CacheTransaction.beforeState
+	pre.cache = post.cache
+
+	one disj tr,tr':CacheTransaction |
 		{
-			cs.cache = pre.cache
-			cs in CacheTransaction.afterState
-			one tr:CacheTransaction |
-				cs in tr.afterState implies
-					t in tr.response.current.*next implies
-						t_pre in tr.response.current.*next
-		}
+			pre in tr.afterState
+			post in tr.beforeState
+		}implies
+			all cs:CacheState |
+				{
+					cs in CacheTransaction.afterState
+					cs.cache = post.cache
+				}implies
+					all tr'':CacheTransaction |
+						cs in tr''.afterState implies
+							{
+								tr.response.current in tr''.response.current.*next	//s => pre
+								tr''.response.current in tr'.request.current.*next	//post => s
+							}
 }
 
-pred checkFirstCacheState[cs:CacheState, t:Time]{
-	no cs':CacheState |
+pred checkFirstCacheState[cs:CacheState]{
+	cs in CacheTransaction.beforeState
+
+	all cs':CacheState |
 		{
-			cs.cache = cs'.cache
 			cs' in CacheTransaction.afterState
-			all tr:CacheTransaction | cs' in tr.afterState implies t in tr.response.current.next.*next
-		}
+			cs.cache = cs'.cache
+		}implies
+			all disj tr,tr':CacheTransaction |
+				{
+					cs in tr.beforeState
+					cs' in tr.afterState
+				}implies
+					tr'.response.current in tr.request.current.*next	//cs => cs'
 }
 
 
