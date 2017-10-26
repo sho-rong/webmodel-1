@@ -2,13 +2,14 @@ open test_parts
 open util/ordering[Time]
 
 fact{
-	all disj pre,post: State |
+	/*all disj pre,post: State |
 		justpre[pre, post] implies
-			post.p = pre
+			post.p = pre*/
 
 	all s:State |
 		firstState[s] implies
 			s.p = s
+		else no s.p
 }
 
 pred justpre[pre:State, post:State]{
@@ -50,8 +51,11 @@ pred firstState[s:State]{
 }
 
 run {
-	one Cache
+	//one Cache
+	#Cache = 2
+
 	no Token
 
-	some s:State | s.p = s
+	//#(State.p) >= 2
+	//all s:State | one s.p implies s.p = s
 } for 4

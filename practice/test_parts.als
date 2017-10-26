@@ -30,17 +30,18 @@ fact{
 	all r:Request | one tr:Transaction | r = tr.req
 	all r:Response | one tr:Transaction | r = tr.res
 
-
 	all tr:Transaction |{
 		tr.res.current in tr.req.current.*next
 		tr.after.cache = tr.before.cache
 		#(tr.before) <= 2
 		#(tr.after) <= 2
 
-		no disj s,s':State |
+		all disj s,s':State |
 			s.cache = s'.cache implies
-				((s in tr.before and s' in tr.before) or
-				(s in tr.after and s' in tr.after))
+				{
+					s in tr.before implies s' !in tr.before
+					s in tr.after implies s' !in tr.after
+				}
 	}
 
 	all s:State |{
