@@ -4,11 +4,17 @@ open util/ordering[Time]
 fact{
 	all disj pre,post: State |
 		justpre[pre, post] implies
-			post.p = pre
+			{
+				post.p = pre
+				post.store in pre.store
+			}
 
 	all s:State |
 		firstState[s] implies
-			s.p = s
+			{
+				s.p = s
+				#(s.store) = 3
+			}
 }
 
 pred justpre[pre:State, post:State]{
@@ -52,8 +58,6 @@ pred firstState[s:State]{
 run {
 	//one Cache
 	//#Cache = 2
-
-	no Token
 
 	//#(State.p) >= 2
 	//all s:State | one s.p implies s.p = s
