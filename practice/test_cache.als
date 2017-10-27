@@ -292,13 +292,13 @@ fact limitBeforeState{
 					pre in (tr'.afterState)
 					tr.request.current in tr'.response.current.*next
 				}implies
-					checkNewestCacheState[pre, before] implies before.store in pre.store + tr.response
+					checkNewestCacheState[pre, before] implies before.store in pre.store
 		}
 
 		all before:CacheState |
 			before in tr.beforeState implies
 				checkFirstCacheState[before] implies
-					no before.store
+					no res:HTTPResponse | res in before.store
 	}
 }
 
@@ -309,6 +309,23 @@ sig CacheState{
 
 fact noOrphanedCacheState{
 	all cs:CacheState | cs in CacheTransaction.beforeState + CacheTransaction.afterState
+}
+
+//同じタイミングで同一のキャッシュに対するキャッシュ状態は存在しない
+fact noMultipleCacheState{
+	all tr:CacheTransaction |
+		all disj cs,cs':CacheState |
+			cs.cache = cs'.cache implies
+				{
+					cs in tr.beforeState implies cs' !in tr.beforeState
+					cs in tr.afterState implies cs' !in tr.afterState
+				}
+	/*no disj cs,cs':CacheState |
+		all tr:CacheTransaction |
+			{
+				(cs in tr.beforeState and cs' in tr.beforeState) implies cs.cache = cs'.cache
+				(cs in tr.afterState and cs' in tr.afterState) implies cs.cache = cs'.cache
+			}*/
 }
 
 //時刻t_preのCacheState preが、時刻tにおいて最新か確認
@@ -440,4 +457,5 @@ run test_reuse{
 	#CacheReuse = 1
 
 	#CacheTransaction = 2
+	//#CacheState >= 2
 } for 4
