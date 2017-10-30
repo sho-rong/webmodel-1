@@ -26,7 +26,7 @@ fact MoveOfIntermediary{
 				e.uri = original.uri
 
 				original in HTTPRequest implies {
-					checkNotResponsed[original, e.current]
+					//checkNotResponsed[original, e.current]
 					e in HTTPRequest
 				}
 
@@ -74,7 +74,7 @@ fact happenResponse{
 	all res:HTTPResponse | one req:HTTPRequest |{
 		//レスポンスに対する条件
 		happensBefore[req, res]
-		checkNotResponsed[req, res.current]
+		//checkNotResponsed[req, res.current]
 		res.uri = req.uri
 		res.from = req.to
 		res.to = req.from
@@ -89,7 +89,7 @@ fact happenCacheReuse{
 	all reuse:CacheReuse | one req:HTTPRequest |{
 		//応答するリクエストに対する条件
 		happensBefore[req, reuse]
-		checkNotResponsed[req, reuse.current]
+		//checkNotResponsed[req, reuse.current]
 		req.uri = reuse.target.uri
 		req.from = reuse.to
 		reuse.from in req.to + req.from
@@ -112,13 +112,14 @@ pred happensBefore[first:Event,second:Event]{
 	second.current in first.current.next.*next
 }
 
+/*
 //ある時点(t)でリクエストに応答されていない
 pred checkNotResponsed[req: HTTPRequest, t: Time]{
-	/*no res:HTTPResponse |{
+	no res:HTTPResponse |{
 		req.uri = res.uri
 
 		{
-			//req -> ... -> res -> ... -> tの順でベントが発生
+			//req -> ... -> res -> ... -> tの順でイベントが発生
 			res.current in req.current.*next
 			t in res.current.next.*next
 
@@ -126,7 +127,7 @@ pred checkNotResponsed[req: HTTPRequest, t: Time]{
 			res.from = req.to
 		}or{
 			some reuse:CacheReuse|{
-				//req -> ... -> reuse -> ... -> tの順でベントが発生
+				//req -> ... -> reuse -> ... -> tの順でイベントが発生
 				reuse.current in req.current.*next
 				t in reuse.current.next.*next
 
@@ -139,8 +140,15 @@ pred checkNotResponsed[req: HTTPRequest, t: Time]{
 				}
 			}
 		}
-	}*/
+	}
 }
+*/
+
+//ある時点tでレスポンスが検証済みか判定
+pred checkVerification[res:HTTPResponse, t:Time]{
+
+}
+
 
 /***********************
 
@@ -188,9 +196,9 @@ fact noOrphanedHeaders {
 	all c:ResponseCacheOption | c in HTTPResponse.headers.options
 }
 
-/*
 //CacheControlHeaderのオプションに関する制限
 fact CCHeaderOption{
+	/*
 	//for "no-cache"
 	all reuse:CacheReuse |{
 		(some op:NoCache | op in reuse.target.headers.options) implies {
@@ -201,10 +209,14 @@ fact CCHeaderOption{
 			}
 		}
 	}
+	*/
 
 	//for "no-store"
-	no store:CacheStore | some op:NoStore | op in store.target.headers.options
+	all res:HTTPResponse |
+		(some op:NoStore | op in res.headers.options) implies
+			all cs:CacheState | res !in cs.store
 
+	/*
 	//for only-if-cached
 	all req:HTTPRequest | (some op:OnlyIfCached | op in req.headers.options) implies {
 		some reuse:CacheReuse | {
@@ -213,14 +225,14 @@ fact CCHeaderOption{
 			reuse.to = req.from
 		}
 	}
+	*/
 
 	//for "private"
-	no op:Private | some store:CacheStore | {
-		store.happen in PublicCache
-		op in store.target.headers.options
-	}
+	all res:HTTPResponse |
+		(some op:Private | op in res.headers.options) implies
+			all cs:CacheState | res in cs.store implies cs.cache in PrivateCache
 }
-*/
+
 
 /****************************
 
@@ -320,12 +332,6 @@ fact noMultipleCacheState{
 					cs in tr.beforeState implies cs' !in tr.beforeState
 					cs in tr.afterState implies cs' !in tr.afterState
 				}
-	/*no disj cs,cs':CacheState |
-		all tr:CacheTransaction |
-			{
-				(cs in tr.beforeState and cs' in tr.beforeState) implies cs.cache = cs'.cache
-				(cs in tr.afterState and cs' in tr.afterState) implies cs.cache = cs'.cache
-			}*/
 }
 
 //時刻t_preのCacheState preが、時刻tにおいて最新か確認
@@ -389,9 +395,6 @@ fact noOrphanedUri{
 	all u:Uri | some e:HTTPEvent | u = e.uri
 }
 
-//時系列に従ったモデルの考察
-// second.pre >= first.post
-
 abstract sig Method {}
 one sig GET extends Method {}
 
@@ -443,7 +446,6 @@ run test_store{
 	#HTTPResponse = 1
 
 	#CacheTransaction = 1
-	#CacheState = 2
 } for 2
 
 run test_reuse{
@@ -457,5 +459,17 @@ run test_reuse{
 	#CacheReuse = 1
 
 	#CacheTransaction = 2
-	//#CacheState >= 2
 } for 4
+
+run checkPrivateOption{
+	all c:Cache | c in PublicCache
+
+	some CacheState.store
+	all res:HTTPResponse | one op:Private | op in res.headers.options
+} for 6
+
+run checkNoStoreOption{
+	some CacheState.store
+
+	all res:HTTPResponse | one op:NoStore | op in res.headers.options
+} for 6
