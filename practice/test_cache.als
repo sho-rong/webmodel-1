@@ -167,10 +167,18 @@ pred checkVerification[tr:HTTPTransaction, store:HTTPResponse, p:NetworkEndpoint
 			//tr'.response.from = store.from
 			//tr'.response.to = p
 
-			(some h:LastModifiedHeader | h in store.headers) implies	//格納レスポンスがLastModifiedHeaderを持っていた場合、IfModifiedSinceHeaderを付けて送信
-				(some h:IfModifiedSinceHeader | h in tr'.request.headers)
-			else (some h:ETagHeader | h in store.headers) implies	//格納レスポンスがETagHeaderを持っていた場合、IfNoneMatchHeaderを付けて送信
+			//tr'.requestが条件付きレスポンスである
+			some h:HTTPHeader |
+				{
+					h in IfNoneMatchHeader + IfModifiedSinceHeader
+					h in tr'.request.headers
+				}
+
+			//格納レスポンスのヘッダに適した条件付きリクエストのヘッダを生成
+			(some h:ETagHeader | h in store.headers) implies	//格納レスポンスがETagHeaderを持っていた場合、IfNoneMatchHeaderを付けて送信
 				(some h:IfNoneMatchHeader | h in tr'.request.headers)
+			else (some h:LastModifiedHeader | h in store.headers) implies	//格納レスポンスがLastModifiedHeaderを持っていた場合、IfModifiedSinceHeaderを付けて送信
+				(some h:IfModifiedSinceHeader | h in tr'.request.headers)
 		}
 }
 
