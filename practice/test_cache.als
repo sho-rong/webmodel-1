@@ -336,6 +336,24 @@ fact limitBeforeState{
 sig CacheState{
 	cache: one Cache,
 	store: set HTTPResponse
+}{
+    cache in PrivateCache implies
+        all res:HTTPResponse | res in store implies
+                {
+                    (one op:Maxage | op in res.headers.options) or
+                    (one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
+                }
+
+    cache in PublicCache implies
+        all res:HTTPResponse | res in store implies
+                {
+                    (one op:Maxage | op in res.headers.options) or
+                    (one op:SMaxage | op in res.headers.options) or
+                    (one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
+                }
+
+    all res:HTTPResponse | res in store implies
+        one h:AgeHeader | h in res.headers
 }
 
 fact noOrphanedCacheState{
