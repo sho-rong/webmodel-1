@@ -50,8 +50,18 @@ fact{
 
 		all tr:Transaction |
 			{
-				s in tr.before implies s.current = tr.req.current
-				s in tr.after implies s.current = tr.res.current
+				s in tr.before implies tr.req.current in s.current
+				s in tr.after implies tr.res.current in s.current
+			}
+
+		all t:Time | t in s.current implies
+			{
+				one tr:Transaction |
+					{
+						t in tr.(req + res).current
+						t in tr.req.current implies s in tr.before
+						t in tr.res.current implies s in tr.after
+					}
 			}
 	}
 }
@@ -60,4 +70,4 @@ run {
 	no State.p
 	no Token
 	one Cache
-} for 4
+} for 6
