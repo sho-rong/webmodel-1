@@ -16,6 +16,15 @@ abstract sig HTTPIntermediary extends HTTPConformist{}
 sig HTTPProxy extends HTTPIntermediary{}
 sig HTTPGateway extends HTTPIntermediary{}
 
+fact MoveOfServer{
+	//条件付きリクエストに対する動作
+	all tr:HTTPTransaction |
+		tr.request.to in HTTPServer implies
+			(one h:HTTPHeader | h in IfNoneMatchHeader + IfModifiedSinceHeader and h in tr.request.headers) implies
+				tr.response.statusCode in c200 + c304
+
+}
+
 fact MoveOfIntermediary{
 	all e:HTTPEvent |{
 		e.from in HTTPIntermediary implies{	//e:中継者から送信されるイベント
@@ -144,9 +153,25 @@ pred checkNotResponsed[req: HTTPRequest, t: Time]{
 }
 */
 
-//ある時点tでレスポンスが検証済みか判定
-pred checkVerification[res:HTTPResponse, t:Time]{
+//あるトランザクションでレスポンス時点で検証済みか判定
+pred checkVerification[tr:HTTPTransaction, store:HTTPResponse, p:NetworkEndpoint]{
+	some tr':HTTPTransaction |
+		{
+			one res:HTTPResponse | res = tr'.response
 
+			tr'.request.current in tr.request.current.*next	//tr.request -> tr'.request
+			tr.response.current in tr'.response.current.*next	//tr'.response -> tr.response
+
+			tr'.request.from = p
+			tr'.request.to = store.from
+			//tr'.response.from = store.from
+			//tr'.response.to = p
+
+			(some h:LastModifiedHeader | h in store.headers) implies	//格納レスポンスがLastModifiedHeaderを持っていた場合、IfModifiedSinceHeaderを付けて送信
+				(some h:IfModifiedSinceHeader | h in tr'.request.headers)
+			else (some h:ETagHeader | h in store.headers) implies	//格納レスポンスがETagHeaderを持っていた場合、IfNoneMatchHeaderを付けて送信
+				(some h:IfNoneMatchHeader | h in tr'.request.headers)
+		}
 }
 
 
@@ -161,18 +186,14 @@ abstract sig HTTPRequestHeader extends HTTPHeader{}
 abstract sig HTTPGeneralHeader extends HTTPHeader{}
 abstract sig HTTPEntityHeader extends HTTPHeader{}
 
-/*
 sig IfModifiedSinceHeader extends HTTPRequestHeader{}
 sig IfNoneMatchHeader extends HTTPRequestHeader{}
 sig ETagHeader extends HTTPResponseHeader{}
 sig LastModifiedHeader extends HTTPResponseHeader{}
 sig AgeHeader extends HTTPResponseHeader{}
-*/
 sig CacheControlHeader extends HTTPGeneralHeader{options : set CacheOption}
-/*
 sig DateHeader extends HTTPGeneralHeader{}
 sig ExpiresHeader extends HTTPEntityHeader{}
-*/
 
 abstract sig CacheOption{}
 abstract sig RequestCacheOption extends CacheOption{}
@@ -198,18 +219,16 @@ fact noOrphanedHeaders {
 
 //CacheControlHeaderのオプションに関する制限
 fact CCHeaderOption{
-	/*
 	//for "no-cache"
 	all reuse:CacheReuse |{
 		(some op:NoCache | op in reuse.target.headers.options) implies {
-			one veri:CacheVerification | {
-				happensBefore[veri,reuse]
-				veri.target = reuse.target
-				veri.happen = reuse.happen
-			}
+			one tr:HTTPTransaction |
+				{
+					reuse = tr.re_res
+					checkVerification[tr, tr.re_res.target, tr.re_res.from]
+				}
 		}
 	}
-	*/
 
 	//for "no-store"
 	all res:HTTPResponse |
@@ -401,8 +420,13 @@ one sig GET extends Method {}
 //レスポンスの状態コード
 abstract sig Status  {}
 abstract sig RedirectionStatus extends Status {}
+/*
+lone sig c200,c401 extends Status{}
+lone sig c301,c302,c303,c304,c305,c306,c307 extends RedirectionStatus {}
+*/
+//for simple model
 lone sig c200 extends Status{}
-lone sig c302 extends RedirectionStatus {}
+lone sig c304 extends RedirectionStatus {}
 
 
 /************************
