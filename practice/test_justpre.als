@@ -55,11 +55,16 @@ pred firstState[s:State]{
 					tr'.res.current in tr.req.current.*next	//s => s'
 }
 
-run {
-	//one Cache
-	//#Cache = 2
+fact{
+	all s:State | one tr:Transaction | s in tr.(before + after)
+	all tr:Transaction | no s:State |
+		{
+			s in tr.before
+			s in tr.after
+		}
+}
 
-	//#(State.p) >= 2
-	//all s:State | one s.p implies s.p = s
-	some disj s,s':State | s.p = s'
-} for 4
+run {
+	no Token
+	one Cache
+} for 6
