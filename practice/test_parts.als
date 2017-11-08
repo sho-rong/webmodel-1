@@ -15,7 +15,7 @@ sig Transaction{
 
 sig State{
 	store: set Token,
-	current: set Time,
+	current: one Time,
 	cache: one Cache,
 	p: lone State
 }
