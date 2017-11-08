@@ -2,57 +2,33 @@ open test_parts
 open util/ordering[Time]
 
 fact{
-	all disj pre,post: State |
-		justpre[pre, post] implies
-			{
-				post.p = pre
-				post.store in pre.store
-			}
-
-	all s:State |
-		firstState[s] implies
-			{
-				s.p = s
-				#(s.store) = 3
-			}
+	all pre, post:State |
+		pre in post.p iff (justpre[pre, post] or (post = pre and firstState[pre]))
 }
 
 pred justpre[pre:State, post:State]{
-	pre in Transaction.after
-	post in Transaction.before
 	pre.cache = post.cache
-	one disj tr, tr':Transaction |
+
+	some t,t' :Time|	//pre:t,  post:t'
 		{
-			pre in tr.after
-			post in tr'.before
-		}implies
-			all s:State |
+			t in pre.current
+			t' in post.current
+			t' in t.next.*next	//pre -> post
+			no s:State |
 				{
-					s in Transaction.after
-					s.cache = post.cache
-				}implies
-					all tr'':Transaction |
-						s in tr''.after implies
-							{
-								tr.res.current in tr''.res.current.*next	//s => pre
-								tr''.res.current in tr'.req.current.*next	//post => s
-							}
+					s != pre
+					s != post
+					s.cache = pre.cache
+					some t'':Time |	//s:t''
+						t'' in t.next.*next and t' in t''.next.*next	//pre -> s -> post
+				}
+		}
 }
 
 pred firstState[s:State]{
-	s in Transaction.before
-
 	all s':State |
-		{
-			s' in Transaction.after
-			s.cache = s'.cache
-		}implies
-			all disj tr, tr':Transaction |
-				{
-					s in tr.before
-					s' in tr'.after
-				}implies
-					tr'.res.current in tr.req.current.*next	//s => s'
+		s.cache = s'.cache implies
+			s'.current in s.current.*next	//s => s'
 }
 
 fact{
@@ -66,5 +42,5 @@ fact{
 
 run {
 	no Token
-	one Cache
+	some Cache
 } for 6
