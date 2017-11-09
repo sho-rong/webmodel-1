@@ -83,7 +83,6 @@ fact happenResponse{
 	all res:HTTPResponse | one req:HTTPRequest |{
 		//レスポンスに対する条件
 		happensBefore[req, res]
-		//checkNotResponsed[req, res.current]
 		res.uri = req.uri
 		res.from = req.to
 		res.to = req.from
@@ -103,13 +102,13 @@ fact happenCacheReuse{
 		reuse.from in req.to + req.from
 
 		//HTTPTransactionに登録 ＆ 再利用レスポンスが先にストアされている
-		one t:HTTPTransaction | {
-			t.request = req
-			t.re_res = reuse
-			one bs:CacheState | {
-				bs in t.beforeState
-				bs.cache = reuse.from.cache
-				reuse.target in bs.store
+		one tr:HTTPTransaction | {
+			tr.request = req
+			tr.re_res = reuse
+			some cs:CacheState | {
+				cs in tr.beforeState
+				cs.cache = reuse.from.cache
+				reuse.target in cs.store
 			}
 		}
 	}
@@ -193,6 +192,7 @@ fact noOrphanedHeaders {
 //CacheControlHeaderのオプションに関する制限
 fact CCHeaderOption{
 	//for "no-cache"
+	/*
 	all reuse:CacheReuse |{
 		(some op:NoCache | op in reuse.target.headers.options) implies {
 			one tr:HTTPTransaction |
@@ -202,11 +202,14 @@ fact CCHeaderOption{
 				}
 		}
 	}
+	*/
 
 	//for "no-store"
+	/*
 	all res:HTTPResponse |
 		(some op:NoStore | op in res.headers.options) implies
 			all cs:CacheState | res !in cs.store
+	*/
 
 	/*
 	//for only-if-cached
@@ -220,9 +223,11 @@ fact CCHeaderOption{
 	*/
 
 	//for "private"
+	/*
 	all res:HTTPResponse |
 		(some op:Private | op in res.headers.options) implies
 			all cs:CacheState | res in cs.store implies cs.cache in PrivateCache
+	*/
 }
 
 
@@ -259,29 +264,7 @@ sig CacheTransaction extends HTTPTransaction{
 	#afterState <= 2
 
 	beforeState.cache = request.from.cache + request.to.cache
-	afterState.cache = request.from.cache + request.to.cache
-
-	//HTTPResponseが存在するTransactionの場合
-	some response implies {
-		all before,after:CacheState | {
-			before.cache = after.cache
-			before in beforeState
-			after in afterState
-		}implies{
-			after.store in before.store + response
-		}
-	}
-
-	//CacheReuseが存在するTransactionの場合
-	some re_res implies{
-		all before,after:CacheState | {
-			before.cache = after.cache
-			before in beforeState
-			after in afterState
-		}implies{
-			after.store = before.store
-		}
-	}
+	afterState.cache = beforeState.cache
 }
 
 sig CacheState{
@@ -323,6 +306,9 @@ fact CacheStateTime{
 				cs in tr.beforeState iff tr.request.current in cs.current
 				cs in tr.afterState iff tr.response.current in cs.current
 			}
+
+	all t:Time |
+		t in CacheState.current implies t in CacheTransaction.(request + response).current
 }
 
 //同じタイミングで同一のキャッシュに対するキャッシュ状態は存在しない
@@ -339,26 +325,32 @@ fact noMultipleCacheState{
 fact flowCacheState{
 	//for debug
 	all pre, post:CacheState |
-		pre in post.p iff (checkNewestCacheState[pre, post] or (post = pre and checkFirstCacheState[pre]))
+		pre in post.p iff (checkNewestCacheStateBefore[pre, post] or (post = pre and checkFirstCacheState[pre]))
 
+	//初期状態のstoreをnullにする
 	all cs:CacheState |
 		checkFirstCacheState[cs] implies
 			no cs.store
 
+	//直前の状態のstoreを引き継ぐ
 	all pre, post:CacheState |
-		checkNewestCacheState[pre, post] implies
-			{
-				post in CacheTransaction.beforeState implies post.store in pre.store
-				post in CacheTransaction.afterState implies post.store in pre.store + HTTPResponse
-			}
+		{
+			post in CacheTransaction.beforeState implies
+				checkNewestCacheStateBefore[pre, post] implies
+					post.store in pre.store
 
+			post in CacheTransaction.afterState implies
+				all tr:CacheTransaction |
+					checkNewestCacheStateAfter[pre, post, tr] implies
+						post.store in pre.store + tr.response
+		}
 }
 
-//時刻t_preのCacheState preが、時刻tにおいて最新か確認
-pred checkNewestCacheState[pre:CacheState, post:CacheState]{
+//preがpostの直前の状態か確認
+pred checkNewestCacheStateBefore[pre:CacheState, post:CacheState]{
 	pre.cache = post.cache
 
-	some t,t' :Time|	//pre:t,  post:t'
+	some t,t' :Time |	//pre:t,  post:t'
 		{
 			t in pre.current
 			t' in post.current
@@ -370,6 +362,26 @@ pred checkNewestCacheState[pre:CacheState, post:CacheState]{
 					cs.cache = pre.cache
 					some t'':Time |	//s:t''
 						t'' in t.next.*next and t' in t''.next.*next	//pre -> cs -> post
+				}
+		}
+}
+
+//preがpostの直前の状態か確認 (postはtrのafterStateに存在)
+pred checkNewestCacheStateAfter[pre:CacheState, post:CacheState, tr:CacheTransaction]{
+	pre.cache = post.cache
+	post in tr.afterState
+
+	some t :Time |	//pre:t,  post:t'
+		{
+			t in pre.current
+			tr.(response + re_res).current in t.next.*next	//pre -> post
+			no cs:CacheState |
+				{
+					cs != pre
+					cs != post
+					cs.cache = pre.cache
+					some t'':Time |	//s:t''
+						t'' in t.next.*next and tr.(response + re_res).current in t''.next.*next	//pre -> cs -> post
 				}
 		}
 }
@@ -425,16 +437,7 @@ sig HTTPTransaction {
 	request : one HTTPRequest,
 	response : lone HTTPResponse,
 	re_res : lone CacheReuse,
-}{
-	some response implies {
-		happensBefore[request,response]
-	}
-
-	some re_res implies {
-		happensBefore[request, re_res]
-	}
-
-}
+}{}
 
 fact limitHTTPTransaction{
 	all req:HTTPRequest | lone t:HTTPTransaction | t.request = req
