@@ -94,7 +94,7 @@ fact happenResponse{
 
 //CacheReuseの発生条件
 fact happenCacheReuse{
-	all reuse:CacheReuse | one req:HTTPRequest |{
+	/*all reuse:CacheReuse | one req:HTTPRequest |{
 		//応答するリクエストに対する条件
 		happensBefore[req, reuse]
 		req.uri = reuse.target.uri
@@ -111,7 +111,17 @@ fact happenCacheReuse{
 				reuse.target in cs.store
 			}
 		}
-	}
+	}*/
+
+	all reuse:CacheReuse | one tr:HTTPTransaction |
+		{
+			tr.re_res = reuse
+			reuse.to = tr.request.from
+			reuse.from in tr.request.(from + to)
+
+			reuse.target in tr.beforeState.store
+			reuse.target.uri = tr.request.uri
+		}
 }
 
 //firstがsecondよりも前に発生しているか確認
@@ -316,11 +326,11 @@ fact noMultipleCacheState{
 					cs in tr.afterState implies cs' !in tr.afterState
 				}
 
-	/*no disj cs,cs':CacheState |
+	no disj cs,cs':CacheState |
 		{
 			cs.cache = cs'.cache
 			cs.store = cs'.store
-		}*/
+		}
 }
 
 fact flowCacheState{
@@ -495,3 +505,8 @@ run checkNoStoreOption{
 
 	all res:HTTPResponse | one op:NoStore | op in res.headers.options
 }
+
+run{
+	some cs:CacheState | #(cs.current) >= 2
+	some CacheState.store
+} for 4
