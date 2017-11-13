@@ -17,7 +17,7 @@ sig State{
 	store: set Token,
 	current: one Time,
 	cache: one Cache,
-	p: lone State
+	p: set State
 }
 sig Token{}
 sig Cache{}
@@ -31,11 +31,17 @@ fact{
 	all r:Response | one tr:Transaction | r = tr.res
 
 	all tr:Transaction |{
-		tr.res.current in tr.req.current.*next
+		//request -> response の順で発生
+		tr.res.current in tr.req.current.next.*next
+
+		//beforeとafterのCacheStateに含まれるキャッシュの数は同じ
 		tr.after.cache = tr.before.cache
+
+		//beforeとafterにそれぞれ含まれるCacheStateは2個
 		#(tr.before) <= 2
 		#(tr.after) <= 2
 
+		//同一のキャッシュのCacheStateはbefore/afterに重複しない
 		all disj s,s':State |
 			s.cache = s'.cache implies
 				{
@@ -45,23 +51,15 @@ fact{
 	}
 
 	all s:State |{
-		s in Transaction.after implies no s.p
+		//すべてのCacheStateはいずれかのTransactionに含まれる
 		s in Transaction.(before+after)
 
+		//あるc:CacheStateがtr.beforeに含まれる <=> cの時間にtr.reqが含まれる
+		//あるc:CacheStateがtr.afterに含まれる <=> cの時間にtr.resが含まれる
 		all tr:Transaction |
 			{
-				s in tr.before implies tr.req.current in s.current
-				s in tr.after implies tr.res.current in s.current
-			}
-
-		all t:Time | t in s.current implies
-			{
-				one tr:Transaction |
-					{
-						t in tr.(req + res).current
-						t in tr.req.current implies s in tr.before
-						t in tr.res.current implies s in tr.after
-					}
+				s in tr.before iff tr.req.current in s.current
+				s in tr.after iff tr.res.current in s.current
 			}
 	}
 }
@@ -70,4 +68,4 @@ run {
 	no State.p
 	no Token
 	one Cache
-} for 6
+} for 4
