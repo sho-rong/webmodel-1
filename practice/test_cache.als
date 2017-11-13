@@ -114,7 +114,7 @@ fact happenCacheReuse{
 	}
 }
 
-//firstがsecondよりも前に発生する
+//firstがsecondよりも前に発生しているか確認
 pred happensBefore[first:Event,second:Event]{
 	second.current in first.current.next.*next
 }
@@ -192,7 +192,6 @@ fact noOrphanedHeaders {
 //CacheControlHeaderのオプションに関する制限
 fact CCHeaderOption{
 	//for "no-cache"
-	/*
 	all reuse:CacheReuse |{
 		(some op:NoCache | op in reuse.target.headers.options) implies {
 			one tr:HTTPTransaction |
@@ -202,14 +201,11 @@ fact CCHeaderOption{
 				}
 		}
 	}
-	*/
 
 	//for "no-store"
-	/*
 	all res:HTTPResponse |
 		(some op:NoStore | op in res.headers.options) implies
 			all cs:CacheState | res !in cs.store
-	*/
 
 	/*
 	//for only-if-cached
@@ -223,11 +219,9 @@ fact CCHeaderOption{
 	*/
 
 	//for "private"
-	/*
 	all res:HTTPResponse |
 		(some op:Private | op in res.headers.options) implies
 			all cs:CacheState | res in cs.store implies cs.cache in PrivateCache
-	*/
 }
 
 
@@ -268,10 +262,10 @@ sig CacheTransaction extends HTTPTransaction{
 }
 
 sig CacheState{
+	//p: set CacheState,
 	cache: one Cache,
 	store: set HTTPResponse,
-	current: set Time,
-	p: set CacheState
+	current: set Time
 }{
     cache in PrivateCache implies
         all res:HTTPResponse | res in store implies
@@ -304,14 +298,15 @@ fact CacheStateTime{
 		all tr:CacheTransaction |
 			{
 				cs in tr.beforeState iff tr.request.current in cs.current
-				cs in tr.afterState iff tr.response.current in cs.current
+				cs in tr.afterState iff tr.(response + re_res).current in cs.current
 			}
 
 	all t:Time |
-		t in CacheState.current implies t in CacheTransaction.(request + response).current
+		t in CacheState.current implies t in CacheTransaction.(request + response + re_res).current
 }
 
 //同じタイミングで同一のキャッシュに対するキャッシュ状態は存在しない
+//同じキャッシュで同じ状態のキャッシュ状態は存在しない（統一する）
 fact noMultipleCacheState{
 	all tr:CacheTransaction |
 		all disj cs,cs':CacheState |
@@ -320,12 +315,18 @@ fact noMultipleCacheState{
 					cs in tr.beforeState implies cs' !in tr.beforeState
 					cs in tr.afterState implies cs' !in tr.afterState
 				}
+
+	/*no disj cs,cs':CacheState |
+		{
+			cs.cache = cs'.cache
+			cs.store = cs'.store
+		}*/
 }
 
 fact flowCacheState{
 	//for debug
-	all pre, post:CacheState |
-		pre in post.p iff (checkNewestCacheStateBefore[pre, post] or (post = pre and checkFirstCacheState[pre]))
+	//all pre, post:CacheState |
+		//pre in post.p iff (checkNewestCacheStateBefore[pre, post] or (post = pre and checkFirstCacheState[pre]))
 
 	//初期状態のstoreをnullにする
 	all cs:CacheState |
@@ -452,6 +453,7 @@ fact limitHTTPTransaction{
 Test Code
 
 ****************************/
+//格納を観測
 run test_store{
 	#HTTPClient = 1
 	#HTTPServer = 1
@@ -463,6 +465,7 @@ run test_store{
 	some CacheState.store
 } for 2
 
+//再利用を観測
 run test_reuse{
 	#HTTPClient = 1
 	#HTTPServer = 1
@@ -476,6 +479,8 @@ run test_reuse{
 	#CacheTransaction = 2
 } for 4
 
+//"private"オプションの効果を確認
+//No instance found で正常
 run checkPrivateOption{
 	all c:Cache | c in PublicCache
 
@@ -483,8 +488,10 @@ run checkPrivateOption{
 	all res:HTTPResponse | one op:Private | op in res.headers.options
 } for 6
 
+//"no-store"オプションの効果を確認
+//No instance found で正常
 run checkNoStoreOption{
 	some CacheState.store
 
 	all res:HTTPResponse | one op:NoStore | op in res.headers.options
-} for 6
+}
