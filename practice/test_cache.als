@@ -88,6 +88,9 @@ fact happenResponse{
 
 		//HTTPTransactionに登録
 		one t:HTTPTransaction | t.request = req and t.response = res
+
+		//所属するTransactionはただ一つ
+		one tr:HTTPTransaction | res = tr.response
 	}
 }
 
@@ -319,99 +322,56 @@ fact noMultipleCacheState{
 }
 
 fact flowCacheState{
-	//for debug
-	all pre, post:CacheState, tr:CacheTransaction|
-		pre in post.p iff (checkNewestCacheStateBefore[pre, post, tr] or checkNewestCacheStateAfter[pre, post, tr] or (post = pre and checkFirstCacheState[pre]))
-
 	//初期状態のstoreをnullにする
 	all cs:CacheState |
 		checkFirstCacheState[cs] implies
 			no cs.store
 
-	//直前の状態のstoreを引き継ぐ
+	//直前のキャッシュの状態を継承する（responseの場合は追加可能）
 	all pre, post:CacheState, tr:CacheTransaction |
-		{
-			post in CacheTransaction.beforeState implies
-				checkNewestCacheStateBefore[pre, post, tr] implies
-					post.store in pre.store
-
-			post in CacheTransaction.afterState implies
-				checkNewestCacheStateAfter[pre, post, tr] implies
-					post.store in pre.store + tr.response
-		}
-
-	/*all pre, post:CacheState, tr:CacheTransaction |
 		{
 			checkNewestCacheStateBefore[pre, post, tr] implies
 				post.store in pre.store
-
 			checkNewestCacheStateAfter[pre, post, tr] implies
 				post.store in (pre.store + tr.response)
-
-			//for debug
-			(checkNewestCacheStateBefore[pre, post, tr] or checkNewestCacheStateAfter[pre, post, tr]) iff pre in post.p
-
-		}*/
-}
-
-//preがpostの直前の状態か確認
-pred checkNewestCacheState[pre:CacheState, post:CacheState]{
-	pre.cache = post.cache
-
-	some t,t' :Time |	//pre:t,  post:t'
-		{
-			t in pre.current
-			t' in post.current
-			t' in t.*next	//pre => post
-			no cs:CacheState |
-				{
-					cs != pre
-					cs != post
-					cs.cache = pre.cache
-					some t'':Time |	//s:t''
-						t'' in t.next.*next and t' in t''.next.*next and t'' in cs.current	//pre -> cs -> post
-				}
 		}
+
+	//for debug
+	all pre, post:CacheState, tr:CacheTransaction |
+		(checkNewestCacheStateBefore[pre, post, tr] or checkNewestCacheStateAfter[pre, post, tr]) iff pre in post.p
 }
 
-//preがpostの直前の状態か確認（preはbeforeStateに存在）
+//preがpostの直前の状態か確認(postがbeforeStateの場合)
 pred checkNewestCacheStateBefore[pre:CacheState, post:CacheState, tr:CacheTransaction]{
 	pre.cache = post.cache
 	post in tr.beforeState
 
-	some t :Time |	//pre:t,  post:t'
+	some t,t':Time |
 		{
-			t in pre.current
-			tr.request.current in t.*next	//pre => post
-			no cs:CacheState |
-				{
-					cs != pre
-					cs != post
-					cs.cache = pre.cache
-					some t'':Time |	//s:t''
-						t'' in t.next.*next and tr.request.current in t''.next.*next and t'' in cs.current	//pre -> cs -> post
-				}
+			t in pre.current	//t:pre
+			t' = tr.request.current	//t':post
+			t' in t.next.*next	//pre -> post
+
+			all cs:CacheState, t'':Time |
+				(cs.cache = pre.cache and t'' in cs.current) implies	//t'':cs
+						(t in t''.*next) or (t'' in t'.*next)	//cs => pre (or) post => cs
 		}
 }
 
-
-//preがpostの直前の状態か確認 (postはtrのafterStateに存在)
+//preがpostの直前の状態か確認(postがafterStateの場合)
 pred checkNewestCacheStateAfter[pre:CacheState, post:CacheState, tr:CacheTransaction]{
 	pre.cache = post.cache
 	post in tr.afterState
 
-	some t :Time |	//pre:t,  post:t'
+	some t,t':Time |
 		{
-			t in pre.current
-			tr.(response + re_res).current in t.next.*next	//pre -> post
-			no cs:CacheState |
-				{
-					cs != pre
-					cs != post
-					cs.cache = pre.cache
-					some t'':Time |	//s:t''
-						t'' in t.next.*next and tr.(response + re_res).current in t''.next.*next and t'' in cs.current	//pre -> cs -> post
-				}
+			t in pre.current	//t:pre
+			t' = tr.(response + re_res).current	//t':post
+			t' in t.next.*next	//pre -> post
+
+			all cs:CacheState, t'':Time |
+				(cs.cache = pre.cache and t'' in cs.current) implies	//t'':cs
+						(t in t''.*next) or (t'' in t'.*next)	//cs => pre (or) post => cs
 		}
 }
 
