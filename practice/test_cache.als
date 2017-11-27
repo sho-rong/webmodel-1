@@ -119,7 +119,7 @@ pred happensBefore[first:Event,second:Event]{
 }
 
 //あるトランザクションでレスポンス時点で検証済みか判定
-pred checkVerification[tr:HTTPTransaction, store:HTTPResponse, p:NetworkEndpoint]{
+pred checkVerification[tr:HTTPTransaction, store:HTTPResponse, ep:NetworkEndpoint]{
 	some tr':HTTPTransaction |
 		{
 			one res:HTTPResponse | res = tr'.response
@@ -127,7 +127,7 @@ pred checkVerification[tr:HTTPTransaction, store:HTTPResponse, p:NetworkEndpoint
 			tr'.request.current in tr.request.current.*next	//tr.request -> tr'.request
 			tr.response.current in tr'.response.current.*next	//tr'.response -> tr.response
 
-			tr'.request.from = p
+			tr'.request.from = ep
 			tr'.request.to = store.from
 
 			//tr'.requestが条件付きレスポンスである
@@ -240,7 +240,7 @@ fact noOrphanedCaches {
 
 //同じ端末に2つ以上のキャッシュは存在しない
 fact noMultipleCaches {
-	all p:NetworkEndpoint | lone c:Cache | c in p.cache
+	all ep:NetworkEndpoint | lone c:Cache | c in ep.cache
 }
 
 fact PublicAndPrivate{
@@ -321,6 +321,13 @@ fact noMultipleCacheState{
 		}
 }
 
+//キャッシュを持つ端末のTransactionは必ずCacheTransactionである
+//キャッシュを持たない端末のTransactionは必ずCacheTransactionでない
+fact {
+	all tr:HTTPTransaction |
+		some tr.request.(from + to).cache iff tr in CacheTransaction
+}
+
 fact flowCacheState{
 	//初期状態のstoreをnullにする
 	all cs:CacheState |
@@ -337,8 +344,8 @@ fact flowCacheState{
 		}
 
 	//for debug
-	all pre, post:CacheState, tr:CacheTransaction |
-		(checkNewestCacheStateBefore[pre, post, tr] or checkNewestCacheStateAfter[pre, post, tr]) iff pre in post.p
+	all pre, post:CacheState |
+		(some tr:CacheTransaction | checkNewestCacheStateBefore[pre, post, tr] or checkNewestCacheStateAfter[pre, post, tr]) iff pre in post.p
 }
 
 //preがpostの直前の状態か確認(postがbeforeStateの場合)
@@ -454,17 +461,14 @@ run test_store{
 } for 2
 
 run test_store{
+	#NetworkEndpoint = 2
 	#HTTPClient = 1
 	#HTTPServer = 1
 
 	#HTTPRequest = 2
 	#HTTPResponse = 2
 
-	#CacheTransaction = 2
-	//some CacheState.store
-	some cs:CacheState | #(cs.store) >= 2
-
-	//some req:HTTPRequest, res:HTTPResponse | req.current in res.current.*next
+	some cs:CacheState | #(cs.store) > 1
 } for 4
 
 //再利用を観測
@@ -489,7 +493,7 @@ run checkPrivateOption{
 	all c:Cache | c in PublicCache
 	some CacheState.store
 	all res:HTTPResponse | one op:Private | op in res.headers.options
-} for 6
+}
 
 //"no-store"オプションの効果を確認
 //No instance found で正常
