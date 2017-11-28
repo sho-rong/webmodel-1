@@ -98,6 +98,8 @@ fact happenResponse{
 fact happenCacheReuse{
 	all reuse:CacheReuse | one tr:HTTPTransaction |
 		{
+			happensBefore[reuse.target, reuse]
+
 			tr.re_res = reuse
 			reuse.to = tr.request.from
 			reuse.from in tr.request.(from + to)
