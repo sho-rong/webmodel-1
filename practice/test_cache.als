@@ -124,7 +124,9 @@ pred happensBefore[first:Event,second:Event]{
 pred checkVerification[tr:HTTPTransaction, store:HTTPResponse, ep:NetworkEndpoint]{
 	some tr':HTTPTransaction |
 		{
-			one res:HTTPResponse | res = tr'.response
+			tr' != tr
+
+			some tr'.response
 
 			tr'.request.current in tr.request.current.*next	//tr.request -> tr'.request
 			tr.response.current in tr'.response.current.*next	//tr'.response -> tr.response
@@ -137,6 +139,13 @@ pred checkVerification[tr:HTTPTransaction, store:HTTPResponse, ep:NetworkEndpoin
 				{
 					h in IfNoneMatchHeader + IfModifiedSinceHeader
 					h in tr'.request.headers
+				}
+
+			//storeに検証に必要なヘッダが含まれている
+			some h:HTTPHeader |
+				{
+					h in ETagHeader + LastModifiedHeader
+					h in store.headers
 				}
 
 			//格納レスポンスのヘッダに適した条件付きリクエストのヘッダを生成
@@ -192,15 +201,10 @@ fact noOrphanedHeaders {
 //CacheControlHeaderのオプションに関する制限
 fact CCHeaderOption{
 	//for "no-cache"
-	all reuse:CacheReuse |{
-		(some op:NoCache | op in reuse.target.headers.options) implies {
-			one tr:HTTPTransaction |
-				{
-					reuse = tr.re_res
-					checkVerification[tr, tr.re_res.target, tr.re_res.from]
-				}
-		}
-	}
+	all tr:CacheTransaction |
+		(some op:NoCache | op in tr.request.headers.options) implies
+			some tr.re_res implies
+				checkVerification[tr, tr.re_res.target, tr.re_res.from]
 
 	//for "no-store"
 	all res:HTTPResponse |
@@ -488,6 +492,32 @@ run test_reuse{
 	some CacheState.store
 	all cs:CacheState | cs in CacheTransaction.afterState implies some cs.store
 } for 4
+
+//検証を観測
+run test_verification{
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#Cache = 1
+	#PrivateCache = 1
+
+	#HTTPRequest = 3
+	#HTTPResponse = 2
+	#CacheReuse = 1
+
+	all req:HTTPRequest | some op:NoCache | op in req.headers.options
+
+	some IfNoneMatchHeader
+	some ETagHeader
+	no IfModifiedSinceHeader
+	no LastModifiedHeader
+
+	/*
+	some IfNoneMatchHeader
+	some ETagHeader
+	no IfModifiedSinceHeader
+	no LastModifiedHeader
+	*/
+} for 6
 
 //"private"オプションの効果を確認
 //No instance found で正常
