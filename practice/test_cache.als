@@ -22,7 +22,6 @@ fact MoveOfServer{
 		tr.request.to in HTTPServer implies
 			(one h:HTTPHeader | h in IfNoneMatchHeader + IfModifiedSinceHeader and h in tr.request.headers) implies
 				tr.response.statusCode in c200 + c304
-
 }
 
 fact MoveOfIntermediary{
@@ -45,6 +44,10 @@ fact MoveOfIntermediary{
 			}
 		}
 	}
+}
+
+fact MoveOfCache{
+
 }
 
 fact ReqAndResMaker{
@@ -104,12 +107,12 @@ fact happenCacheReuse{
 			reuse.to = tr.request.from
 			reuse.from in tr.request.(from + to)
 
-			some cs:CacheState |
-				{
-					cs in tr.beforeState
-					reuse.target in cs.store
-					reuse.from.cache = cs.cache
-				}
+			all pre, post:CacheState |
+				(post in tr.afterState and checkNewestCacheStateAfter[pre, post, tr]) implies
+					{
+						reuse.target in pre.store
+						reuse.from.cache = pre.cache
+					}
 
 			reuse.target.uri = tr.request.uri
 		}
@@ -121,39 +124,41 @@ pred happensBefore[first:Event,second:Event]{
 }
 
 //あるトランザクションでレスポンス時点で検証済みか判定
-pred checkVerification[tr:HTTPTransaction, store:HTTPResponse, ep:NetworkEndpoint]{
-	some tr':HTTPTransaction |
-		{
-			tr' != tr
+pred checkVerification[tr:HTTPTransaction]{
+	let store = tr.re_res.target, ep = tr.re_res.from |
+		some tr':HTTPTransaction |
+			{
+				tr' != tr
 
-			some tr'.response
+				some tr'.response
 
-			tr'.request.current in tr.request.current.*next	//tr.request -> tr'.request
-			tr.response.current in tr'.response.current.*next	//tr'.response -> tr.response
+				tr'.request.current in tr.request.current.*next	//tr.request => tr'.request
+				tr.response.current in tr'.response.current.*next	//tr'.response => tr.response
 
-			tr'.request.from = ep
-			tr'.request.to = store.from
+				tr'.request.from = ep
+				tr'.request.to = store.from
+				tr'.request.uri = store.uri
 
-			//tr'.requestが条件付きレスポンスである
-			some h:HTTPHeader |
-				{
-					h in IfNoneMatchHeader + IfModifiedSinceHeader
-					h in tr'.request.headers
-				}
+				//tr'.requestが条件付きレスポンスである
+				some h:HTTPHeader |
+					{
+						h in IfNoneMatchHeader + IfModifiedSinceHeader
+						h in tr'.request.headers
+					}
 
-			//storeに検証に必要なヘッダが含まれている
-			some h:HTTPHeader |
-				{
-					h in ETagHeader + LastModifiedHeader
-					h in store.headers
-				}
+				//storeに検証に必要なヘッダが含まれている
+				some h:HTTPHeader |
+					{
+						h in ETagHeader + LastModifiedHeader
+						h in store.headers
+					}
 
-			//格納レスポンスのヘッダに適した条件付きリクエストのヘッダを生成
-			(some h:ETagHeader | h in store.headers) implies	//格納レスポンスがETagHeaderを持っていた場合、IfNoneMatchHeaderを付けて送信
-				(some h:IfNoneMatchHeader | h in tr'.request.headers)
-			else (some h:LastModifiedHeader | h in store.headers) implies	//格納レスポンスがLastModifiedHeaderを持っていた場合、IfModifiedSinceHeaderを付けて送信
-				(some h:IfModifiedSinceHeader | h in tr'.request.headers)
-		}
+				//格納レスポンスのヘッダに適した条件付きリクエストのヘッダを生成
+				(some h:ETagHeader | h in store.headers) implies	//格納レスポンスがETagHeaderを持っていた場合、IfNoneMatchHeaderを付けて送信
+					(some h:IfNoneMatchHeader | h in tr'.request.headers)
+				else (some h:LastModifiedHeader | h in store.headers) implies	//格納レスポンスがLastModifiedHeaderを持っていた場合、IfModifiedSinceHeaderを付けて送信
+					(some h:IfModifiedSinceHeader | h in tr'.request.headers)
+			}
 }
 
 /***********************
@@ -204,7 +209,7 @@ fact CCHeaderOption{
 	all tr:CacheTransaction |
 		(some op:NoCache | op in tr.request.headers.options) implies
 			some tr.re_res implies
-				checkVerification[tr, tr.re_res.target, tr.re_res.from]
+				checkVerification[tr]
 
 	//for "no-store"
 	all res:HTTPResponse |
@@ -439,14 +444,15 @@ sig HTTPTransaction {
 	request : one HTTPRequest,
 	response : lone HTTPResponse,
 	re_res : lone CacheReuse,
-}{}
+}{
+	(response + re_res).current in request.current.*next
+}
 
 fact limitHTTPTransaction{
 	all req:HTTPRequest | lone t:HTTPTransaction | t.request = req
 	all reuse:CacheReuse | lone t:HTTPTransaction | t.re_res = reuse
-	no t:HTTPTransaction |{
+	no t:HTTPTransaction |
 		some t.response and some t.re_res
-	}
 }
 
 /****************************
@@ -517,6 +523,8 @@ run test_verification{
 	no IfModifiedSinceHeader
 	no LastModifiedHeader
 	*/
+
+	some tr:HTTPTransaction | checkVerification[tr] and some tr.re_res
 } for 6
 
 //"private"オプションの効果を確認
@@ -535,6 +543,23 @@ run checkNoStoreOption{
 }
 
 run{
-	some cs:CacheState | #(cs.current) >= 2
+	#NetworkEndpoint = 2
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#Cache = 1
+	#PrivateCache = 1
+
+	#HTTPRequest = 2
+	#HTTPResponse = 2
+
 	some CacheState.store
 } for 4
+
+assert checkState{
+	/*all post:CacheState | some pre:CacheState, tr:CacheTransaction |
+		checkNewestCacheStateBefore[pre, post, tr] or checkNewestCacheStateAfter[pre, post, tr] or checkFirstCacheState[post]*/
+
+	one CacheReuse implies
+		all reuse:CacheReuse | all res:HTTPResponse | reuse.current in res.current.*next
+}
+check checkState for 4
