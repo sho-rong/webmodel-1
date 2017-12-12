@@ -16,14 +16,6 @@ abstract sig HTTPIntermediary extends HTTPConformist{}
 sig HTTPProxy extends HTTPIntermediary{}
 sig HTTPGateway extends HTTPIntermediary{}
 
-fact MoveOfServer{
-	//条件付きリクエストに対する動作
-	all tr:HTTPTransaction |
-		tr.request.to in HTTPServer implies
-			(one h:HTTPHeader | h in IfNoneMatchHeader + IfModifiedSinceHeader and h in tr.request.headers) implies
-				tr.response.statusCode in c200 + c304
-}
-
 fact MoveOfIntermediary{
 	all e:HTTPEvent |{
 		e.from in HTTPIntermediary implies{	//e:中継者から送信されるイベント
@@ -159,6 +151,62 @@ pred checkVerification[tr:HTTPTransaction]{
 				else (some h:LastModifiedHeader | h in store.headers) implies	//格納レスポンスがLastModifiedHeaderを持っていた場合、IfModifiedSinceHeaderを付けて送信
 					(some h:IfModifiedSinceHeader | h in tr'.request.headers)
 			}
+}
+
+//条件付きリクエストのトランザクション
+fact ConditionalRequestTransaction{
+	all tr:HTTPTransaction |
+		(one h:HTTPHeader | h in IfNoneMatchHeader + IfModifiedSinceHeader and h in tr.request.headers) implies {
+			//レスポンスの内容
+			tr.response.statusCode in c200 + c304
+
+			//レスポンスに対する動作
+			tr.response.statusCode in c200 implies{	//再利用不可
+				some tr.response.from.cache implies {
+					all cs:CacheState |
+						cs in tr.afterState and cs.cache = tr.response.from.cache implies
+							tr.response in cs.store
+
+					one res:HTTPResponse, cs:CacheState | {
+						cs in tr.afterState
+						cs.cache = tr.response.from.cache
+						res in cs.store
+						res.uri = tr.response.uri
+					}
+				}
+
+				some tr.response.to.cache implies {
+					all cs:CacheState |
+						cs in tr.afterState and cs.cache = tr.response.to.cache implies
+							tr.response in cs.store
+
+					one res:HTTPResponse, cs:CacheState | {
+						cs in tr.afterState
+						cs.cache = tr.response.to.cache
+						res in cs.store
+						res.uri = tr.response.uri
+					}
+				}
+			}
+
+			tr.response.statusCode in c304 implies{	//再利用可
+				some tr.response.from.cache implies
+					one res:HTTPResponse, cs:CacheState | {
+						cs in tr.afterState
+						cs.cache = tr.response.from.cache
+						res in cs.store
+						res.uri = tr.response.uri
+					}
+
+				some tr.response.to.cache implies
+					one res:HTTPResponse, cs:CacheState | {
+						cs in tr.afterState
+						cs.cache = tr.response.from.cache
+						res in cs.store
+						res.uri = tr.response.uri
+					}
+			}
+		}
 }
 
 /***********************
