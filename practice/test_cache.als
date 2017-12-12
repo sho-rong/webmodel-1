@@ -36,10 +36,22 @@ fact MoveOfIntermediary{
 			}
 		}
 	}
-}
 
-fact MoveOfCache{
+	all tr:HTTPTransaction |{
+		tr.request.to in HTTPIntermediary implies{
+			one tr.response implies{
+				one tr':HTTPTransaction |{
+					tr'.request.current in tr.request.current.*next	//tr.req => tr'.req
+					tr.response.current in tr'.response.current.*next	//tr'.res => tr.res
 
+					tr'.request.from = tr.request.to
+					tr'.request.uri = tr.request.uri
+					tr.response.body = tr'.response.body
+					tr.response.statusCode = tr'.response.statusCode
+				}
+			}
+		}
+	}
 }
 
 fact ReqAndResMaker{
@@ -108,6 +120,11 @@ fact happenCacheReuse{
 
 			reuse.target.uri = tr.request.uri
 		}
+
+	//自分自身のキャッシュを再利用する場合、その再利用はリクエストの直後に起きる
+	all tr:HTTPTransaction |
+		(one tr.re_res) and (tr.re_res.from = tr.request.from) implies
+				tr.re_res.current = tr.request.current.next
 }
 
 //firstがsecondよりも前に発生しているか確認
