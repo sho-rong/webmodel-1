@@ -5,11 +5,6 @@ open util/ordering[Time]
 Network Component
 
 ***********************/
-abstract sig Principal {
-// without the -HTTPClient the HTTPS check fails
-	servers : set NetworkEndpoint,
-	dnslabels : set DNS,
-}
 abstract sig NetworkEndpoint{cache : lone Cache}
 abstract sig HTTPConformist extends NetworkEndpoint{}
 sig HTTPServer extends HTTPConformist{}
@@ -34,7 +29,7 @@ sig HTTPGateway extends HTTPIntermediary{}
 fact MoveOfIntermediary{
 	all tr:HTTPTransaction |{
 		tr.request.to in HTTPIntermediary implies{
-			one tr.response implies{
+			one tr.response implies{	//応答を行う場合、その応答を得る別のトランザクションがリクエストとレスポンスの間に存在する
 				one tr':HTTPTransaction |{
 					tr'.request.current in tr.request.current.*next	//tr.req => tr'.req
 					tr.response.current in tr'.response.current.*next	//tr'.res => tr.res
@@ -312,6 +307,7 @@ fact noMultipleCaches {
 	all ep:NetworkEndpoint | lone c:Cache | c in ep.cache
 }
 
+//PrivateCacheとPrivateCacheの場所を指定
 fact PublicAndPrivate{
 	all pri:PrivateCache | pri in HTTPClient.cache
 	all pub:PublicCache | (pub in HTTPServer.cache) or (pub in HTTPIntermediary.cache)
@@ -566,6 +562,11 @@ lone sig c301,c302,c303,c304,c305,c306,c307 extends RedirectionStatus {}
 HTTPServer Definitions
 
 ***********************/
+abstract sig Principal {
+// without the -HTTPClient the HTTPS check fails
+	servers : set NetworkEndpoint,
+	dnslabels : set DNS,
+}
 lone sig ACTIVEATTACKER extends Principal{}
 
 //Passive Principals match their http / network parts
@@ -640,7 +641,6 @@ fact NormalPrincipalsDontMakeRequests {
 Client Definitions
 
 ************************************/
-
 // Each user is associated with a set of network locations
 // from where they use their credentials
 pred isAuthorizedAccess[user:WebPrincipal, loc:NetworkEndpoint]{
@@ -924,10 +924,10 @@ run show2 {
 
 /***********************
 
+
 HTTP Facts
 
 ************************/
-
 fact scriptContextsAreSane {
 	all disj sc,sc':ScriptContext | no (sc.transactions & sc'.transactions)
 	all t:HTTPTransaction | t.request.from in Browser implies t in ScriptContext.transactions
@@ -937,7 +937,6 @@ fact scriptContextsAreSane {
 fact HTTPTransactionsAreSane {
 	all disj t,t':HTTPTransaction | no (t.response & t'.response ) and no (t.request & t'.request)
 }
-
 
 //run basicModelIsConsistent  for 8 but 3 HTTPResponse//, 3 HTTPRequest,
 
@@ -952,98 +951,6 @@ fact HTTPTransactionsAreSane {
 Test Code
 
 ************************/
-//格納を観測
-run test_store{
-	#HTTPClient = 1
-	#HTTPServer = 1
-
-	#HTTPRequest = 1
-	#HTTPResponse = 1
-
-	#CacheTransaction = 1
-	some CacheState.store
-} for 2
-
-run test_store{
-	#NetworkEndpoint = 2
-	#HTTPClient = 1
-	#HTTPServer = 1
-
-	#HTTPRequest = 2
-	#HTTPResponse = 2
-
-	some cs:CacheState | #(cs.store) > 1
-} for 4
-
-//再利用を観測
-run test_reuse{
-	#HTTPClient = 1
-	#HTTPServer = 1
-	#Cache = 1
-
-	#HTTPRequest = 2
-	#HTTPResponse = 1
-	#CacheReuse = 1
-
-	#CacheTransaction = 2
-} for 4
-
-//検証を観測
-run test_verification{
-	#HTTPClient = 1
-	#HTTPServer = 1
-	#HTTPIntermediary = 0
-	#Cache = 1
-	#PrivateCache = 1
-
-	some tr:CacheTransaction | checkVerification[tr]
-} for 6
-
-//"private"オプションの効果を確認
-//No instance found で正常
-run checkPrivateOption{
-	all c:Cache | c in PublicCache
-	some CacheState.store
-	all res:HTTPResponse | one op:Private | op in res.headers.options
-}
-
-//"no-store"オプションの効果を確認
-//No instance found で正常
-run checkNoStoreOption{
-	some CacheState.store
-	all res:HTTPResponse | one op:NoStore | op in res.headers.options
-}
-
-//"no-cache"オプションの効果を確認
-//No instance found で正常
-run checkNoCacheOption{
-	some tr:CacheTransaction |
-	{
-		some op:NoCache | op in tr.request.headers.options
-		one tr.re_res
-	}
-
-	no tr:CacheTransaction | checkVerification[tr]
-}
-
-run{
-	#NetworkEndpoint = 2
-	#HTTPClient = 1
-	#HTTPServer = 1
-	#Cache = 1
-	#PrivateCache = 1
-
-	#HTTPRequest = 2
-	#HTTPResponse = 2
-
-	some CacheState.store
-} for 4
-
-assert checkState{
-	/*all post:CacheState | some pre:CacheState, tr:CacheTransaction |
-		checkNewestCacheStateBefore[pre, post, tr] or checkNewestCacheStateAfter[pre, post, tr] or checkFirstCacheState[post]*/
-
-	one CacheReuse implies
-		all reuse:CacheReuse | all res:HTTPResponse | reuse.current in res.current.*next
-}
-check checkState for 4
+run test{
+	one HTTPClient
+} for 3
