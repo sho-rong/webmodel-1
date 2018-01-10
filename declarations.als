@@ -5,11 +5,11 @@ open util/ordering[Time]
 Network Component
 
 ***********************/
-abstract sig NetworkEndpoint{cache : lone Cache}
-abstract sig HTTPConformist extends NetworkEndpoint{}
+abstract sig NetworkEndpoint{}
+abstract sig HTTPConformist extends NetworkEndpoint{cache : lone Cache}
 sig HTTPServer extends HTTPConformist{}
 abstract sig HTTPClient extends HTTPConformist{
-  owner:WebPrincipal // owner of the HTTPClient process
+	owner:WebPrincipal // owner of the HTTPClient process
 }
 sig Browser extends HTTPClient {
 	trustedCA : set certificateAuthority
@@ -28,12 +28,14 @@ sig HTTPGateway extends HTTPIntermediary{}
 
 fact MoveOfIntermediary{
 	all tr:HTTPTransaction |{
-		tr.request.to in HTTPIntermediary implies{
-			one tr.response implies{	//応答を行う場合、その応答を得る別のトランザクションがリクエストとレスポンスの間に存在する
-				one tr':HTTPTransaction |{
-					tr'.request.current in tr.request.current.*next	//tr.req => tr'.req
-					tr.response.current in tr'.response.current.*next	//tr'.res => tr.res
+		tr.request.to in HTTPIntermediary and one tr.response implies{	//応答を行う場合、その応答を得る別のトランザクションがリクエストとレスポンスの間に存在する
+			some tr':HTTPTransaction |{
+				//tr.req -> tr'.req -> tr'.res -> tr.res
+				tr'.request.current in tr.request.current.*next
+				tr.response.current in tr'.response.current.*next
 
+				//通常のユーザ + WEBATTACKERが所有する中継者のふるまい
+				tr.request.to in WebPrincipal.servers implies{
 					tr'.request.from = tr.request.to
 					tr'.request.uri = tr.request.uri
 					tr.response.body = tr'.response.body
@@ -68,7 +70,7 @@ abstract sig HTTPEvent extends NetworkEvent {
 	headers: set HTTPHeader,
 	host : Origin,
 	uri: one Uri,
-	body :  set Token
+	body: set Token
 }
 
 sig HTTPRequest extends HTTPEvent {
@@ -232,16 +234,9 @@ sig ExpiresHeader extends HTTPEntityHeader{}
 abstract sig CacheOption{}
 abstract sig RequestCacheOption extends CacheOption{}
 abstract sig ResponseCacheOption extends CacheOption{}
-//all
-/*
 sig Maxage,NoCache,NoStore,NoTransform extends CacheOption{}
 sig MaxStale,MinStale,OnlyIfCached extends RequestCacheOption{}
 sig MustRevalidate,Public,Private,ProxyRevalidate,SMaxage extends ResponseCacheOption{}
-*/
-//for simple model
-sig Maxage,NoCache,NoStore extends CacheOption{}
-sig OnlyIfCached extends RequestCacheOption{}
-sig Private,SMaxage extends ResponseCacheOption{}
 
 //どのリクエスト・レスポンスにも属さないヘッダは存在しない
 //各ヘッダは適切なリクエスト・レスポンスに属する
@@ -330,7 +325,7 @@ sig CacheState{
 	store: set HTTPResponse,
 	current: set Time
 }{
-    cache in PrivateCache implies
+	cache in PrivateCache implies
         all res:HTTPResponse | res in store implies
                 {
                     (one op:Maxage | op in res.headers.options) or
@@ -407,10 +402,6 @@ fact flowCacheState{
 			checkNewestCacheStateAfter[pre, post, tr] implies
 				post.store in (pre.store + tr.response)
 		}
-
-	//for debug
-	//all pre, post:CacheState |
-	//	(some tr:CacheTransaction | checkNewestCacheStateBefore[pre, post, tr] or checkNewestCacheStateAfter[pre, post, tr]) iff pre in post.p
 }
 
 //preがpostの直前の状態か確認(postがbeforeStateの場合)
@@ -452,6 +443,7 @@ pred checkFirstCacheState[cs:CacheState]{
 		cs.cache = cs'.cache implies
 			cs'.current in cs.current.*next	//cs => cs'
 }
+
 
 /************************
 
@@ -552,10 +544,6 @@ abstract sig RedirectionStatus extends Status {}
 lone sig c200,c401 extends Status{}
 lone sig c301,c302,c303,c304,c305,c306,c307 extends RedirectionStatus {}
 
-//for simple model
-//lone sig c200 extends Status{}
-//lone sig c304 extends RedirectionStatus {}
-
 
 /***********************
 
@@ -567,23 +555,23 @@ abstract sig Principal {
 	servers : set NetworkEndpoint,
 	dnslabels : set DNS,
 }
-lone sig ACTIVEATTACKER extends Principal{}
 
 //Passive Principals match their http / network parts
 abstract sig PassivePrincipal extends Principal{}{
 	servers in HTTPConformist
 }
 
-lone sig PASSIVEATTACKER extends PassivePrincipal{}
-sig WebPrincipal extends PassivePrincipal {
-  httpClients : set HTTPClient
-} { httpClients.owner = this }
+abstract sig WebPrincipal extends PassivePrincipal {
+	httpClients : set HTTPClient
+}{
+	all c:HTTPClient | c in httpClients implies c.owner = this
+}
 
-//HTTPAdherent so that it can make requests too
-lone sig WEBATTACKER extends WebPrincipal{}
+sig Alice extends WebPrincipal {}
 
-lone sig Alice extends WebPrincipal {}
-lone sig Mallory extends WEBATTACKER {}
+sig ACTIVEATTACKER extends Principal{}
+sig PASSIVEATTACKER extends PassivePrincipal{}
+sig WEBATTACKER extends WebPrincipal{}
 
 abstract sig NormalPrincipal extends WebPrincipal{} { 	dnslabels.resolvesTo in servers}
 lone sig GOOD extends NormalPrincipal{}
@@ -634,7 +622,6 @@ fact WebPrincipalsObeyTheHostHeader {
 fact NormalPrincipalsDontMakeRequests {
 	no aReq:HTTPRequest | aReq.from in NormalPrincipal.servers
 }
-
 
 /***********************************
 
@@ -717,9 +704,6 @@ sig HTTPTransaction {
 	cert : lone Certificate,
 	cause : lone HTTPTransaction + RequestAPI
 }{
-	//response/reuseはrequestの後に発生する
-	(response + re_res).current in request.current.*next
-
 	some response implies {
 		//response can come from anyone but HTTP needs to say it is from correct person and hosts are the same, so schema is same
 		response.host = request.host
@@ -767,6 +751,7 @@ pred isCrossOriginRequest[request:HTTPRequest]{
 }
 
 // moved CORS to a separate file cors.alf for modularization
+
 
 /************************************
 * CSRF
@@ -817,6 +802,7 @@ sig Certificate {
 				ne in cn.resolvesTo
 			}
 }
+
 
 /****************************
 
@@ -914,7 +900,6 @@ fact NormalPrincipalsDontReuseCookies{
 	}
 }
 
-
 /*
 run show2 {
 	some (SetCookieHeader).thecookie
@@ -951,6 +936,45 @@ fact HTTPTransactionsAreSane {
 Test Code
 
 ************************/
-run test{
-	one HTTPClient
-} for 3
+
+run test_bcp{
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#HTTPIntermediary = 1
+	#PrivateCache = 1
+	#PublicCache = 0
+
+	#HTTPRequest = 3
+	#HTTPResponse = 2
+	#CacheReuse = 1
+
+	#Principal = 3
+	#Alice = 2
+	#PASSIVEATTACKER = 1
+
+	some tr,tr',tr'':HTTPTransaction | {
+		//tr.req => tr'.req => tr'.res => tr.res => tr''.req => tr''.reuse
+		tr'.request.current in tr.request.current.*next
+		tr.response.current in tr'.response.current.*next
+		tr''.request.current in tr.response.current.*next
+		some tr''.re_res
+
+		//tr: client <-> intermediary
+		tr.request.from in HTTPClient
+		tr.request.to in HTTPIntermediary
+
+		//tr': intermediary <-> server
+		tr'.request.from in HTTPIntermediary
+		tr'.request.to in HTTPServer
+
+		//tr'': client <-> ?
+		tr''.request.from in HTTPClient
+
+		tr.response.body != tr'.response.body
+	}
+
+	some c:HTTPClient | c in Alice.httpClients
+	some s:HTTPServer | s in Alice.servers
+	no i:HTTPIntermediary | i in Alice.servers
+} for 6
+
