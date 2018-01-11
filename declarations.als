@@ -74,12 +74,14 @@ abstract sig HTTPEvent extends NetworkEvent {
 }
 
 sig HTTPRequest extends HTTPEvent {
-  // host + path == url
+	// host + path == url
 	method: Method,
 	path : Path,
 	queryString : set attributeNameValuePair,  // URL query string parameters
 }
-sig HTTPResponse extends HTTPEvent {statusCode: one Status}
+sig HTTPResponse extends HTTPEvent {
+	statusCode: one Status
+}
 sig CacheReuse extends NetworkEvent{target: one HTTPResponse}
 
 //firstがsecondよりも前に発生しているか確認
@@ -451,19 +453,16 @@ DNS
 
 ************************/
 sig DNS{
-	parent : DNS + DNSRoot,	//ドメインの各部を所持
+	parent : DNS + DNSRoot,
 	resolvesTo : set NetworkEndpoint
 }{
 // A DNS Label resolvesTo something
-//1つ以上のNetworkEndpointに接続
 	some resolvesTo
 }
 
-//定数:DNSroot
 one sig DNSRoot {}
 
 //全てのDNSについて、自身からたどれるparentの集合に自身は含まれない
-
 fact dnsIsAcyclic {
 	 all x: DNS | x !in x.^parent
 //	 all x:dns-dnsRoot | some x.parent
@@ -472,8 +471,8 @@ fact dnsIsAcyclic {
 // s is  a subdomain of d
 //sのparentをたどるとdが存在する⇔sがdのサブドメインである
 pred isSubdomainOf[s: DNS, d: DNS]{
-   //e.g. .stanford.edu is a subdomain of .edu
-  d in s.*parent
+	//e.g. .stanford.edu is a subdomain of .edu
+	d in s.*parent
 }
 
 //DNSから対象のPrincipalを取得
@@ -511,7 +510,7 @@ abstract sig Token {}
 //秘匿情報 作成者、期限を持つ
 abstract sig Secret extends Token {
 	madeBy : Principal,
-	expiration : one Int,
+	expiration : lone Time,
 }
 
 sig Uri{}
@@ -522,9 +521,6 @@ fact noOrphanedUri{
 }
 
 sig URL {path:Path, host:Origin}
-
-//時系列に従ったモデルの考察
-// second.pre >= first.post
 
 abstract sig Method {}
 one sig GET extends Method {}
@@ -623,6 +619,7 @@ fact NormalPrincipalsDontMakeRequests {
 	no aReq:HTTPRequest | aReq.from in NormalPrincipal.servers
 }
 
+
 /***********************************
 
 Client Definitions
@@ -631,21 +628,18 @@ Client Definitions
 // Each user is associated with a set of network locations
 // from where they use their credentials
 pred isAuthorizedAccess[user:WebPrincipal, loc:NetworkEndpoint]{
-  loc in user.httpClients
+	loc in user.httpClients
 }
 
 /*
 fun smartClient[]:set Browser {
-  Firefox3 + InternetExplorer8
+	Firefox3 + InternetExplorer8
 }
 */
-
-// Ideally want tp use the old Principals thing
 
 sig WWWAuthnHeader extends HTTPResponseHeader{}{
   all resp:HTTPResponse| (some (WWWAuthnHeader & resp.headers)) => resp.statusCode=c401
 }
-
 
 // each user has at most one password
 sig UserPassword extends UserToken { }
@@ -676,18 +670,17 @@ sig ScriptContext {
 	transactions.request.from = location
 }
 
+sig attributeNameValuePair { name: Token, value: Token}
+
+sig LocationHeader extends HTTPResponseHeader {
+	targetOrigin : Origin,
+	targetPath : Path,
+	params : set attributeNameValuePair  // URL request parameters
+}
 //sig location extends HTTPResponseHeader {targetOrigin : Origin, targetPath : Path}
 // The name location above easily conflicts with other attributes and variables with the same name.
 // We should follow the convention of starting type names with a capital letter.
 // Address this in later clean-up.
-
-sig attributeNameValuePair { name: Token, value: Token}
-
-sig LocationHeader extends HTTPResponseHeader {
-  targetOrigin : Origin,
-  targetPath : Path,
-  params : set attributeNameValuePair  // URL request parameters
-}
 
 abstract sig RequestAPI{} // extends Event
 
@@ -728,7 +721,7 @@ fact limitHTTPTransaction{
 fact CauseHappensBeforeConsequence  {
 	all t1: HTTPTransaction | some (t1.cause) implies {
        (some t0:HTTPTransaction | (t0 in t1.cause and happensBefore[t0.response, t1.request]))
-       or (some r0:RequestAPI | (r0 in t1.cause ))
+		or (some r0:RequestAPI | (r0 in t1.cause ))
        // or (some r0:RequestAPI | (r0 in t1.cause and happensBefore[r0, t1.req]))
     }
 }
@@ -750,8 +743,6 @@ pred isCrossOriginRequest[request:HTTPRequest]{
 		getContextOf[request].dnslabel != request.host.dnslabel
 }
 
-// moved CORS to a separate file cors.alf for modularization
-
 
 /************************************
 * CSRF
@@ -763,12 +754,12 @@ sig OriginHeader extends HTTPRequestHeader {theorigin: Origin}
 
 
 fun getFinalResponse[req:HTTPRequest]:HTTPResponse{
-        {res : HTTPResponse | not ( res.statusCode in RedirectionStatus) and res in ((request.req).*(~cause)).response}
+		{res : HTTPResponse | not ( res.statusCode in RedirectionStatus) and res in ((request.req).*(~cause)).response}
 }
 
 pred isFinalResponseOf[req:HTTPRequest, res : HTTPResponse] {
-       not ( res.statusCode in RedirectionStatus)
-       res in ((request.req).*(~cause)).response
+		not ( res.statusCode in RedirectionStatus)
+		res in ((request.req).*(~cause)).response
 }
 
 //enum Port{P80,P8080}
@@ -776,8 +767,6 @@ enum Schema{HTTP,HTTPS}
 sig Path{}
 sig INDEX,HOME,SENSITIVE, PUBLIC, LOGIN,LOGOUT,REDIRECT extends Path{}
 sig PATH_TO_COMPROMISE extends SENSITIVE {}
-
-// sig User extends WebPrincipal { }
 
 sig Origin {
 //	port: Port,
@@ -909,7 +898,6 @@ run show2 {
 
 /***********************
 
-
 HTTP Facts
 
 ************************/
@@ -918,17 +906,9 @@ fact scriptContextsAreSane {
 	all t:HTTPTransaction | t.request.from in Browser implies t in ScriptContext.transactions
 }
 
-
 fact HTTPTransactionsAreSane {
 	all disj t,t':HTTPTransaction | no (t.response & t'.response ) and no (t.request & t'.request)
 }
-
-//run basicModelIsConsistent  for 8 but 3 HTTPResponse//, 3 HTTPRequest,
-
-// run findBasicModelInstance  for 6  but 2 HTTPResponse,
-//2 HTTPRequest, 2 RequestAPI, 0 GOOD, 0 SECURE ,2 Secret, 0 String1
-//1 ACTIVEATTACKER, 1 WEBATTACKER, 1 ORIGINAWARE,
-//, 2  Origin,
 
 
 /***********************
@@ -977,4 +957,3 @@ run test_bcp{
 	some s:HTTPServer | s in Alice.servers
 	no i:HTTPIntermediary | i in Alice.servers
 } for 6
-
