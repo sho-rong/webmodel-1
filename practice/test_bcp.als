@@ -5,13 +5,12 @@ open util/ordering[Time]
 Network Component
 
 ***********************/
-abstract sig Principal {
-	servers : set NetworkEndpoint,
-}
-abstract sig NetworkEndpoint{cache : lone Cache}
-abstract sig HTTPConformist extends NetworkEndpoint{}
+abstract sig NetworkEndpoint{}
+abstract sig HTTPConformist extends NetworkEndpoint{cache : lone Cache}
 sig HTTPServer extends HTTPConformist{}
-abstract sig HTTPClient extends HTTPConformist{}
+abstract sig HTTPClient extends HTTPConformist{
+  owner:WebPrincipal // owner of the HTTPClient process
+}
 sig Browser extends HTTPClient {}
 abstract sig HTTPIntermediary extends HTTPConformist{}
 sig HTTPProxy extends HTTPIntermediary{}
@@ -62,7 +61,8 @@ abstract sig NetworkEvent extends Event {
 
 abstract sig HTTPEvent extends NetworkEvent {
 	headers: set HTTPHeader,
-	uri: one Uri
+	uri: one Uri,
+	body :  set Token
 }
 
 sig HTTPRequest extends HTTPEvent {}
@@ -366,6 +366,12 @@ fact Traces{
 	all t:Time | one e:Event | t = e.current
 }
 
+abstract sig Token {}
+
+fact noOrphanedToken{
+	all t:Token | some e:HTTPEvent | t in e.body
+}
+
 sig Uri{}
 
 //使用されないURIは存在しない
@@ -382,6 +388,31 @@ lone sig c304 extends RedirectionStatus {}
 lone sig c200,c401 extends Status{}
 lone sig c301,c302,c303,c304,c305,c306,c307 extends RedirectionStatus {}
 */
+
+
+/***********************
+
+Network Character
+
+***********************/
+abstract sig Principal {
+	servers : set NetworkEndpoint,
+}
+
+abstract sig PassivePrincipal extends Principal{}{
+	servers in HTTPConformist
+}
+
+abstract sig WebPrincipal extends PassivePrincipal {
+ 	httpClients : set HTTPClient
+} { httpClients.owner = this }
+
+sig ACTIVEATTACKER extends Principal{}	//GadgetAttacker
+sig PASSIVEATTACKER extends PassivePrincipal{}	//WebAttacker
+sig WEBATTACKER extends WebPrincipal{}	//NetworkAttacker
+
+sig Alice extends WebPrincipal {}
+sig Mallory extends WEBATTACKER {}
 
 
 /***********************
@@ -536,10 +567,32 @@ run bcp{
 	all req:HTTPRequest | {
 		req.from in HTTPClient implies req.to in HTTPIntermediary
 		req.from in HTTPIntermediary implies req.to in HTTPServer
+
+		#(req.body) = 0
 	}
 
 	all res:HTTPResponse | {
 		res.from in HTTPServer implies res.to in HTTPIntermediary
 		res.from in HTTPIntermediary implies res.to in HTTPClient
+
+		#(res.body) = 1
+		all disj res1, res2:HTTPResponse | no t:Token | t in res1.body and t in res2.body
 	}
 } for 7
+
+run test_alice{
+	//one HTTPClient
+	//one HTTPServer
+	//no HTTPIntermediary
+	//no Cache
+
+	//one HTTPRequest
+	//one HTTPResponse
+
+	//no HTTPHeader
+
+	#Principal = 2
+	#Alice = 1
+	#WEBATTACKER = 1
+	//no point:NetworkEndpoint | point in Mallory.servers and point in Browser
+} for 2
