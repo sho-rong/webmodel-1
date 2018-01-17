@@ -12,15 +12,7 @@ abstract sig HTTPClient extends HTTPConformist{
 	owner:WebPrincipal // owner of the HTTPClient process
 }
 sig Browser extends HTTPClient {
-	trustedCA : set certificateAuthority
 }
-
-/*sig InternetExplorer extends Browser{}
-sig InternetExplorer7 extends InternetExplorer{}
-sig InternetExplorer8 extends InternetExplorer{}
-sig Firefox extends Browser{}
-sig Firefox3 extends Firefox {}
-sig Safari extends Browser{}*/
 
 abstract sig HTTPIntermediary extends HTTPConformist{}
 sig HTTPProxy extends HTTPIntermediary{}
@@ -68,16 +60,11 @@ abstract sig NetworkEvent extends Event {
 
 abstract sig HTTPEvent extends NetworkEvent {
 	headers: set HTTPHeader,
-	host : Origin,
 	uri: one Uri,
 	body: set Token
 }
 
 sig HTTPRequest extends HTTPEvent {
-	// host + path == url
-	method: Method,
-	path : Path,
-	queryString : set attributeNameValuePair,  // URL query string parameters
 }
 sig HTTPResponse extends HTTPEvent {
 	statusCode: one Status
@@ -116,7 +103,7 @@ fact happenCacheReuse{
 			reuse.to = str.request.from
 			reuse.from in str.request.(from + to)
 
-			all pre, post:CacheState |
+			some pre, post:CacheState |
 				(post in str.afterState and JustBeforeState[pre, post, str]) implies
 					{
 						reuse.target in pre.dif.store
@@ -303,7 +290,7 @@ fact noMultipleCaches {
 	all ep:NetworkEndpoint | lone c:Cache | c in ep.cache
 }
 
-//PrivateCacheとPrivateCacheの場所を指定
+//PrivateCacheとPrivateCacheの場所の制限
 fact PublicAndPrivate{
 	all pri:PrivateCache | pri in HTTPClient.cache
 	all pub:PublicCache | (pub in HTTPServer.cache) or (pub in HTTPIntermediary.cache)
@@ -331,36 +318,26 @@ sig CacheState extends State{}{
     all res:HTTPResponse | res in dif.store implies
         one h:AgeHeader | h in res.headers
 }
-sig CacheEqItem extends EqItem{
-	cache: one Cache
-}
-sig CacheDifItem extends DifItem{
-	store: set HTTPResponse
-}
+sig CacheEqItem extends EqItem{cache: one Cache}
+sig CacheDifItem extends DifItem{store: set HTTPResponse}
 
-//同じタイミングで同一のキャッシュに対するキャッシュ状態は存在しない
-//同じキャッシュで同じ状態のキャッシュ状態は存在しない（統合する）
-fact noMultipleCacheState{
-	all str:StateTransaction |
-		all disj cs,cs':CacheState |
-			cs.eq.cache = cs'.eq.cache implies
-				{
-					cs in str.beforeState implies cs' !in str.beforeState
-					cs in str.afterState implies cs' !in str.afterState
-				}
-
-	no disj cs,cs':CacheState |
-		{
-			cs.eq.cache = cs'.eq.cache
-			cs.dif.store = cs'.dif.store
-		}
+//同じ内容のCacheEqItem, CacheDifItemは統合される
+fact noMultipleItems{
+	no disj i,i':CacheEqItem | i.cache = i'.cache
+	no disj i,i':CacheDifItem | i.store = i'.store
 }
 
-//キャッシュを持つ端末のTransactionは必ずCacheTransactionである
-//キャッシュを持たない端末のTransactionは必ずCacheTransactionでない
-fact ExistCacheTransaction{
+//キャッシュを持つ端末を含むTransaction => StateTransactionである
+//すべてのStateTransactionは、リクエストのfrom/toに含まれるキャッシュの状態をbeforeStateに持つ
+//すべてのStateTransactionは、レスポンスor再利用を持つ場合、beforeStateで状態を持っているキャッシュの状態をafterStateに持つ
+fact CacheInTransaction{
 	all tr:HTTPTransaction |
-		some tr.request.(from + to).cache iff tr in StateTransaction
+		(some tr.request.(from + to).cache implies tr in StateTransaction)
+
+	all str:StateTransaction |{
+		str.beforeState.eq.cache = str.request.(from + to).cache
+		some str.(request + re_res) implies str.afterState.eq.cache = str.beforeState.eq.cache
+	}
 }
 
 fact flowCacheState{
@@ -373,57 +350,9 @@ fact flowCacheState{
 	all pre, post:CacheState, str:StateTransaction |
 		JustBeforeState[pre, post, str] implies {
 			post in str.beforeState implies post.dif.store in pre.dif.store
-			post in str.afterState implies pre.dif.store in (pre.dif.store + str.response)
+			post in str.afterState implies post.dif.store in (pre.dif.store + str.response)
 		}
 }
-
-
-/************************
-
-DNS
-
-************************/
-sig DNS{
-	parent : DNS + DNSRoot,
-	resolvesTo : set NetworkEndpoint
-}{
-// A DNS Label resolvesTo something
-	some resolvesTo
-}
-
-one sig DNSRoot {}
-
-//全てのDNSについて、自身からたどれるparentの集合に自身は含まれない
-fact dnsIsAcyclic {
-	 all x: DNS | x !in x.^parent
-//	 all x:dns-dnsRoot | some x.parent
-}
-
-// s is  a subdomain of d
-//sのparentをたどるとdが存在する⇔sがdのサブドメインである
-pred isSubdomainOf[s: DNS, d: DNS]{
-	//e.g. .stanford.edu is a subdomain of .edu
-	d in s.*parent
-}
-
-//DNSから対象のPrincipalを取得
-fun getPrincipalFromDNS[dns : DNS]:Principal{
-	dnslabels.dns
-}
-
-//Originから対象のPrincipalを取得
-fun getPrincipalFromOrigin[o: Origin]:Principal{
-	getPrincipalFromDNS[o.dnslabel]
-}
-
-//異なるプリンシパルは同じDNS、同じサーバを持たない
-fact DNSIsDisjointAmongstPrincipals {
-	all disj p1,p2 : Principal | (no (p1.dnslabels & p2.dnslabels)) and ( no (p1.servers & p2.servers))
-//The servers disjointness is a problem for virtual hosts. We will replace it with disjoint amongst attackers and trusted people or something like that
-}
-
-// turn this on for intermediate checks
-// run show {} for 6
 
 
 /***********************
@@ -437,31 +366,13 @@ fact Traces{
 	all t:Time | one e:Event | t = e.current
 }
 
-abstract sig Token {}
-//秘匿情報 作成者、期限を持つ
-abstract sig Secret extends Token {
-	madeBy : Principal,
-	expiration : lone Time,
-}
+sig Token {}
 
 sig Uri{}
 
 //使用されないURIは存在しない
 fact noOrphanedUri{
 	all u:Uri | some e:HTTPEvent | u = e.uri
-}
-
-sig URL {path:Path, host:Origin}
-
-abstract sig Method {}
-one sig GET extends Method {}
-one sig PUT  extends Method {}
-one sig POST extends Method {}
-one sig DELETE extends Method {}
-one sig OPTIONS extends Method {}
-
-fun safeMethods[]:set Method {
-	GET+OPTIONS
 }
 
 //レスポンスの状態コード
@@ -480,7 +391,6 @@ HTTPServer Definitions
 abstract sig Principal {
 // without the -HTTPClient the HTTPS check fails
 	servers : set NetworkEndpoint,
-	dnslabels : set DNS,
 }
 
 //Passive Principals match their http / network parts
@@ -500,121 +410,6 @@ sig ACTIVEATTACKER extends Principal{}
 sig PASSIVEATTACKER extends PassivePrincipal{}
 sig WEBATTACKER extends WebPrincipal{}
 
-abstract sig NormalPrincipal extends WebPrincipal{} { 	dnslabels.resolvesTo in servers}
-lone sig GOOD extends NormalPrincipal{}
-lone sig SECURE extends NormalPrincipal{}
-lone sig ORIGINAWARE extends NormalPrincipal{}
-
-fact NonActiveFollowHTTPRules {
-// Old rule was :
-//	all t:HTTPTransaction | t.resp.from in HTTPServer implies t.req.host.server = t.resp.from
-// We rewrite to say HTTPAdherents cant spoof from part ... here we don't say anything about principal
-	all httpresponse:HTTPResponse | httpresponse.from in HTTPConformist implies httpresponse.from in httpresponse.host.dnslabel.resolvesTo
-}
-
-fact SecureIsHTTPSOnly {
-// Add to this the fact that transaction schema is consistent
-	all httpevent:HTTPEvent | httpevent.from in SECURE.servers implies httpevent.host.schema = HTTPS
-//	STS Requirement : all sc : ScriptContext | some (getPrincipalFromOrigin[sc.owner] & SECURE ) implies sc.transactions.req.host.schema=HTTPS
-}
-
-fact CSRFProtection {
-	all aResp:HTTPResponse | aResp.from in ORIGINAWARE.servers and aResp.statusCode=c200 implies {
-		(response.aResp).request.method in safeMethods or (
-		let theoriginchain = ((response.aResp).request.headers & OriginHeader).theorigin |
-			some theoriginchain and theoriginchain.dnslabel in ORIGINAWARE.dnslabels
-		)
-	}
-}
-
-fact NormalPrincipalsHaveNonTrivialDNSValues {
-// Normal Principals don't mess around with trivial DNS values
-   DNSRoot !in NormalPrincipal.dnslabels.parent
-}
-
-fact WebPrincipalsObeyTheHostHeader {
-	all aResp:HTTPResponse |
-		let p = servers.(aResp.from) |
-			p in WebPrincipal implies {
-				//the host header a NormalPrincipal Sets is always with the DNSLabels it owns
-				aResp.host.dnslabel in p.dnslabels
-				// it also makes sure that the from server is the same one that the dnslabel resolvesTo
-				aResp.from in aResp.host.dnslabel.resolvesTo
-
-				//additionally it responds to some request and keep semantics similar to the way Browsers keep them
-				some t:HTTPTransaction | t.response = aResp and t.request.host.dnslabel = t.response.host.dnslabel and t.request.host.schema = t.response.host.schema
-			}
-}
-
-fact NormalPrincipalsDontMakeRequests {
-	no aReq:HTTPRequest | aReq.from in NormalPrincipal.servers
-}
-
-
-/***********************************
-
-Client Definitions
-
-************************************/
-// Each user is associated with a set of network locations
-// from where they use their credentials
-pred isAuthorizedAccess[user:WebPrincipal, loc:NetworkEndpoint]{
-	loc in user.httpClients
-}
-
-/*
-fun smartClient[]:set Browser {
-	Firefox3 + InternetExplorer8
-}
-*/
-
-sig WWWAuthnHeader extends HTTPResponseHeader{}{
-  all resp:HTTPResponse| (some (WWWAuthnHeader & resp.headers)) => resp.statusCode=c401
-}
-
-// each user has at most one password
-sig UserPassword extends UserToken { }
-
-// sig AliceUserPassword extends UserPassword {} {id = Alice and madeBy in Alice }
-
-pred somePasswordExists {
-  some UserPassword //|p.madeBy in Alice
-}
-
-//run somePasswordExists for 8
-
-pred basicModelIsConsistent {
-  some ScriptContext
-  some t1:HTTPTransaction |{
-    some (t1.request.from & Browser ) and
-    some (t1.response)
-  }
-}
-
-// Browsers run a scriptContext
-sig ScriptContext {
-	owner : Origin,
-	location : Browser,
-	transactions: set HTTPTransaction
-}{
-// Browsers are honest, they set the from correctly
-	transactions.request.from = location
-}
-
-sig attributeNameValuePair { name: Token, value: Token}
-
-sig LocationHeader extends HTTPResponseHeader {
-	targetOrigin : Origin,
-	targetPath : Path,
-	params : set attributeNameValuePair  // URL request parameters
-}
-//sig location extends HTTPResponseHeader {targetOrigin : Origin, targetPath : Path}
-// The name location above easily conflicts with other attributes and variables with the same name.
-// We should follow the convention of starting type names with a capital letter.
-// Address this in later clean-up.
-
-abstract sig RequestAPI{} // extends Event
-
 
 /************************
 
@@ -625,220 +420,22 @@ sig HTTPTransaction {
 	request : one HTTPRequest,
 	response : lone HTTPResponse,
 	re_res : lone CacheReuse,
-	cert : lone Certificate,
-	cause : lone HTTPTransaction + RequestAPI
 }{
 	some response implies {
-		//response can come from anyone but HTTP needs to say it is from correct person and hosts are the same, so schema is same
-		response.host = request.host
 		happensBefore[request,response]
 	}
 
 	some re_res implies {
 		happensBefore[request, re_res]
 	}
-
-	request.host.schema = HTTPS implies some cert and some response
-	some cert implies request.host.schema = HTTPS
 }
 
 fact limitHTTPTransaction{
 	all req:HTTPRequest | lone t:HTTPTransaction | t.request = req
+	all res:HTTPResponse | lone t:HTTPTransaction | t.response = res
 	all reuse:CacheReuse | lone t:HTTPTransaction | t.re_res = reuse
 	no t:HTTPTransaction |
 		some t.response and some t.re_res
-}
-
-fact CauseHappensBeforeConsequence  {
-	all t1: HTTPTransaction | some (t1.cause) implies {
-       (some t0:HTTPTransaction | (t0 in t1.cause and happensBefore[t0.response, t1.request]))
-		or (some r0:RequestAPI | (r0 in t1.cause ))
-       // or (some r0:RequestAPI | (r0 in t1.cause and happensBefore[r0, t1.req]))
-    }
-}
-
-fun getTrans[e:HTTPEvent]:HTTPTransaction{
-	(request+response).e
-}
-
-fun getScriptContext[t:HTTPTransaction]:ScriptContext {
-		transactions.t
-}
-
-fun getContextOf[req:HTTPRequest]:Origin {
-	(transactions.(request.req)).owner
-}
-
-pred isCrossOriginRequest[request:HTTPRequest]{
-		getContextOf[request].schema != request.host.schema or
-		getContextOf[request].dnslabel != request.host.dnslabel
-}
-
-
-/************************************
-* CSRF
-*
-************************************/
-// RFC talks about having Origin Chain and not a single Origin
-// We handle Origin chain by having multiple Origin Headers
-sig OriginHeader extends HTTPRequestHeader {theorigin: Origin}
-
-
-fun getFinalResponse[req:HTTPRequest]:HTTPResponse{
-		{res : HTTPResponse | not ( res.statusCode in RedirectionStatus) and res in ((request.req).*(~cause)).response}
-}
-
-pred isFinalResponseOf[req:HTTPRequest, res : HTTPResponse] {
-		not ( res.statusCode in RedirectionStatus)
-		res in ((request.req).*(~cause)).response
-}
-
-//enum Port{P80,P8080}
-enum Schema{HTTP,HTTPS}
-sig Path{}
-sig INDEX,HOME,SENSITIVE, PUBLIC, LOGIN,LOGOUT,REDIRECT extends Path{}
-sig PATH_TO_COMPROMISE extends SENSITIVE {}
-
-sig Origin {
-//	port: Port,
-	schema: Schema,
-	dnslabel : DNS,
-}
-
-abstract sig certificateAuthority{}
-one sig BADCA,GOODCA extends certificateAuthority{}
-
-sig Certificate {
-	ca : certificateAuthority,
-	cn : DNS,
-	ne : NetworkEndpoint
-}{
-
-	//GoodCAVerifiesNonTrivialDNSValues
-	ca in GOODCA and cn.parent != DNSRoot implies
-			some p:Principal | {
-				cn in p.dnslabels
-				ne in p.servers
-				ne in cn.resolvesTo
-			}
-}
-
-
-/****************************
-
-Cookie Stuff
-
-****************************/
-// Currently the String type is taken but not yet implemented in Alloy
-// We will replace String1 with String when the latter is fully available in Alloy
-sig String1 {}
-
-sig UserToken extends Secret {
-        id : WebPrincipal
-}
-
-sig Cookie extends Secret {
-	name : Token,
-	value : Token,
-	domain : DNS,
-	path : Path,
-}{}
-
-sig SecureCookie extends Cookie {}
-
-sig CookieHeader extends HTTPRequestHeader{ thecookie : Cookie }
-sig SetCookieHeader extends HTTPResponseHeader{	thecookie : Cookie }
-
-fact SecureCookiesOnlySentOverHTTPS{
-		all e:HTTPEvent,c:SecureCookie | {
-				e.from in Browser + NormalPrincipal.servers
-				httpPacketHasCookie[c,e]
-		} implies e.host.schema=HTTPS
-
-}
-
-fact CookiesAreSameOriginAndSomeOneToldThemToTheClient{
-	all areq:HTTPRequest |{
-			areq.from in Browser
-			some ( areq.headers & CookieHeader)
-	} implies  all acookie :(areq.headers & CookieHeader).thecookie | some aresp: location.(areq.from).transactions.response | {
-				//don't do same origin check as http cookies can go over https
-				aresp.host.dnslabel = areq.host.dnslabel
-				acookie in (aresp.headers & SetCookieHeader).thecookie
-				happensBefore[aresp,areq]
-	}
-}
-
-pred httpPacketHasCookie[c:Cookie,httpevent:HTTPRequest+HTTPResponse]{
-				(httpevent in HTTPRequest and  c in (httpevent.headers & CookieHeader).thecookie ) or
-				(httpevent in HTTPResponse and c in (httpevent.headers & SetCookieHeader).thecookie)
-}
-
-pred hasKnowledgeViaUnencryptedHTTPEvent[c: Cookie, ne : NetworkEndpoint, usageEvent: Event]{
-		ne !in WebPrincipal.servers + Browser
-		some httpevent : HTTPEvent | {
-			happensBefore[httpevent,usageEvent]
-			httpevent.host.schema = HTTP
-			httpPacketHasCookie[c,httpevent]
-		}
-}
-
-pred hasKnowledgeViaDirectHTTP[c:Cookie,ne:NetworkEndpoint,usageEvent:Event]{
-		some t: HTTPTransaction | {
-		happensBefore[t.request,usageEvent]
-		httpPacketHasCookie[c,t.request]
-		t.response.from = ne
-	} or {
-		happensBefore[t.response,usageEvent]
-		httpPacketHasCookie[c,t.response]
-		some ((transactions.t).location & ne)
-		}
-}
-
-pred hasKnowledgeCookie[c:Cookie,ne:NetworkEndpoint,usageEvent:Event]{
-	ne in c.madeBy.servers or hasKnowledgeViaUnencryptedHTTPEvent[c,ne,usageEvent] or hasKnowledgeViaDirectHTTP[c,ne,usageEvent]
-}
-
-fact BeforeUsingCookieYouNeedToKnowAboutIt{
-	all e:HTTPRequest + HTTPResponse |
-// Use httpPacketHasCookie
-			all c:(e.(HTTPRequest <: headers) & CookieHeader).thecookie + (e.(HTTPResponse <: headers) & SetCookieHeader).thecookie |
-					hasKnowledgeCookie[c,e.from,e]
-}
-
-fact NormalPrincipalsOnlyUseCookiesTheyMade{
-	all e:HTTPResponse |
-		all c:(e.headers & SetCookieHeader).thecookie | {
-			e.from in NormalPrincipal.servers implies c.madeBy = e.from[servers]
-		}
-}
-
-fact NormalPrincipalsDontReuseCookies{
-	all p:NormalPrincipal | no disj e1,e2:HTTPResponse | {
-			(e1.from + e2.from) in p.servers
-			some ( 	(e1.headers & SetCookieHeader).thecookie & (e2.headers & SetCookieHeader).thecookie )
-	}
-}
-
-/*
-run show2 {
-	some (SetCookieHeader).thecookie
-} for 6
-*/
-
-
-/***********************
-
-HTTP Facts
-
-************************/
-fact scriptContextsAreSane {
-	all disj sc,sc':ScriptContext | no (sc.transactions & sc'.transactions)
-	all t:HTTPTransaction | t.request.from in Browser implies t in ScriptContext.transactions
-}
-
-fact HTTPTransactionsAreSane {
-	all disj t,t':HTTPTransaction | no (t.response & t'.response ) and no (t.request & t'.request)
 }
 
 
@@ -848,14 +445,59 @@ State
 
 ************************/
 abstract sig State{
+	flow: set State,
 	eq: one EqItem,
 	dif: one DifItem,
 	current: set Time
 }
 
+//同じeqをもつ => 同じbefore/afterStateに存在しない
+//同じeq,difを持つStateは存在しない
+fact noMultipleState{
+	all str:StateTransaction |
+		all disj s,s':CacheState |
+			s.eq = s'.eq implies
+				{
+					s in str.beforeState implies s' !in str.beforeState
+					s in str.afterState implies s' !in str.afterState
+				}
+
+	no disj s,s':State |{
+		s.eq = s'.eq
+		s.dif = s'.dif
+	}
+}
+
 abstract sig EqItem{}
 abstract sig DifItem{}
 
+sig StateTransaction extends HTTPTransaction{
+	beforeState: set State,
+	afterState: set State
+}
+
+//すべてのStateは、どこかのbefore/afterStateに属する
+//すべてのStateTransactionは、before/afterStateにStateを持つ
+//使用されていないEq/DifItemは存在しない
+fact noOrphanedStates{
+	all s:State | s in StateTransaction.(beforeState + afterState)
+	all str:StateTransaction | some str.(beforeState + afterState)
+	all i:EqItem | i in State.eq
+	all i:DifItem | i in State.dif
+}
+
+//flowに関する条件
+fact catchStateFlow{
+	all pre,post:State, str:StateTransaction |
+		JustBeforeState[pre, post, str] implies
+			post in pre.flow
+	all s,s':State |
+		s' in s.flow implies
+			(some str:StateTransaction | JustBeforeState[s, s', str])
+}
+
+//StateがbeforeStateに属する <=> Stateがリクエストの時間を持つ
+//StateがafterStateに属する <=> Stateがレスポンスの時間を持つ
 fact StateCurrentTime{
 	all s:State |
 		all str:StateTransaction |
@@ -868,22 +510,6 @@ fact StateCurrentTime{
 		t in State.current implies t in StateTransaction.(request + response + re_res).current
 }
 
-sig StateTransaction extends HTTPTransaction{
-	beforeState: set State,
-	afterState: set State
-}
-
-fact CacheStateInTransaction{
-	all str:StateTransaction |{
-		str.beforeState.cache = str.request.(from + to).cache
-		str.afterState.cache = str.beforeState.cache
-	}
-}
-
-fact noOrphanedState{
-	all s:State | s in StateTransaction.(beforeState + afterState)
-}
-
 //preがpostの直前の状態か確認
 pred JustBeforeState[pre:State, post:State, str:StateTransaction]{
 	pre.eq = post.eq
@@ -891,28 +517,104 @@ pred JustBeforeState[pre:State, post:State, str:StateTransaction]{
 
 	some t,t':Time |
 		{
-			//t:pre, t':post, pre->post
-			t in pre.current	//t:pre
-			(post in str.beforeState implies t' = str.request.current) or (post in str.afterState implies t' = str.(response + re_res).current)
-			t' in t.next.*next	//pre -> post
+			//t:pre, t':post
+			//pre->post
+			t in pre.current
+			t' in str.(request + response + re_res).current
+			t' in str.request.current implies post in str.beforeState
+			t' in str.(response + re_res).current implies post in str.afterState
+			t' in t.next.*next
 
 			all s:State, t'':Time |
-				(s.eq = pre.eq and t'' in s.current) implies	//t'':cs
-						(t in t''.*next) or (t'' in t'.*next)	//cs => pre (or) post => cs
+				(s.eq = pre.eq and t'' in s.current) implies	//t'':s
+						(t in t''.*next) or (t'' in t'.*next)	//s => pre (or) post => cs
 		}
 }
 
+//sが初期状態か確認
 pred FirstState[s:State]{
 	all s':State |
 		s.eq = s'.eq implies
-			s'.current in s.current.*next	//cs => cs'
+			s'.current in s.current.*next	//s => s'
 }
+
 
 /***********************
 
 Test Code
 
 ************************/
+//レスポンスを格納
+run test_store{
+	#HTTPClient = 1
+	#HTTPServer = 1
+
+	#HTTPRequest = 1
+	#HTTPResponse = 1
+
+	some CacheState.dif.store
+} for 2
+
+//2つのレスポンスを同時に格納
+run test_store2{
+	#NetworkEndpoint = 2
+	#HTTPClient = 1
+	#HTTPServer = 1
+
+	#HTTPRequest = 2
+	#HTTPResponse = 2
+
+	some cs:CacheState | #(cs.dif.store) = 2
+} for 4
+
+//再利用を観測
+run test_reuse{
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#Cache = 1
+
+	#HTTPRequest = 2
+	#HTTPResponse = 1
+	#CacheReuse = 1
+} for 4
+
+//検証を観測
+run test_verification{
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#HTTPIntermediary = 0
+	#Cache = 1
+	#PrivateCache = 1
+
+	some str:StateTransaction | checkVerification[str]
+} for 6
+
+//"private"オプションの効果を確認
+//No instance found で正常
+run checkPrivateOption{
+	all c:Cache | c in PublicCache
+	some CacheState.dif.store
+	all res:HTTPResponse | one op:Private | op in res.headers.options
+}
+
+//"no-store"オプションの効果を確認
+//No instance found で正常
+run checkNoStoreOption{
+	some CacheState.dif.store
+	all res:HTTPResponse | one op:NoStore | op in res.headers.options
+}
+
+//"no-cache"オプションの効果を確認
+//No instance found で正常
+run checkNoCacheOption{
+	some str:StateTransaction |
+	{
+		some op:NoCache | op in str.request.headers.options
+		one str.re_res
+	}
+
+	no str:StateTransaction | checkVerification[str]
+}
 
 //same orgin BCP Attack
 run test_bcp{
