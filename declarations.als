@@ -108,53 +108,53 @@ fact happenResponse{
 
 //CacheReuseの発生条件
 fact happenCacheReuse{
-	all reuse:CacheReuse | one tr:CacheTransaction |
+	all reuse:CacheReuse | one str:StateTransaction |
 		{
 			happensBefore[reuse.target, reuse]
 
-			tr.re_res = reuse
-			reuse.to = tr.request.from
-			reuse.from in tr.request.(from + to)
+			str.re_res = reuse
+			reuse.to = str.request.from
+			reuse.from in str.request.(from + to)
 
 			all pre, post:CacheState |
-				(post in tr.afterState and checkNewestCacheStateAfter[pre, post, tr]) implies
+				(post in str.afterState and JustBeforeState[pre, post, str]) implies
 					{
-						reuse.target in pre.store
-						reuse.from.cache = pre.cache
+						reuse.target in pre.dif.store
+						reuse.from.cache = pre.eq.cache
 					}
 
-			reuse.target.uri = tr.request.uri
+			reuse.target.uri = str.request.uri
 		}
 }
 
 //ある再利用を行うトランザクションでレスポンス時点で検証済みか判定
-pred checkVerification[tr:CacheTransaction]{
-	one tr.re_res	//再利用で応答している
+pred checkVerification[str:StateTransaction]{
+	one str.re_res	//再利用で応答している
 
 	//検証を行っているトランザクションが成立している
-	some tr':CacheTransaction |	//tr': 検証を行うトランザクション
+	some str':StateTransaction |	//tr': 検証を行うトランザクション
 	{
-		tr' != tr
-		one tr'.response	//検証のレスポンスが存在する
+		str' != str
+		one str'.response	//検証のレスポンスが存在する
 
-		tr'.request.current in tr.request.current.*next	//tr.request => tr'.request
-		tr.re_res.current in tr'.response.current.*next	//tr'.response => tr.reuse
+		str'.request.current in str.request.current.*next	//tr.request => tr'.request
+		str.re_res.current in str'.response.current.*next	//tr'.response => tr.reuse
 
-		tr'.request.from = tr.re_res.from
-		tr'.request.to = tr.re_res.target.from
-		tr'.request.uri = tr.request.uri
+		str'.request.from = str.re_res.from
+		str'.request.to = str.re_res.target.from
+		str'.request.uri = str.request.uri
 
 		//検証可能なレスポンスがtr.request時点で格納されている
 		some tar_res:HTTPResponse |
 		{
-			tar_res.uri = tr.request.uri
+			tar_res.uri = str.request.uri
 
 			//検証対象のレスポンスがtr.request時点で格納されている
 			one cs:CacheState |
 			{
-				cs in tr.beforeState
-				cs.cache = tr.re_res.from.cache
-				tar_res in cs.store
+				cs in str.beforeState
+				cs.eq.cache = str.re_res.from.cache
+				tar_res in cs.dif.store
 			}
 
 			//検証対象のレスポンスに必要なヘッダが含まれている
@@ -166,9 +166,9 @@ pred checkVerification[tr:CacheTransaction]{
 
 			//格納レスポンスのヘッダに適した条件付きリクエストのヘッダを生成
 			(some h:ETagHeader | h in tar_res.headers) implies	//格納レスポンスがETagHeaderを持っていた場合、IfNoneMatchHeaderを付けて送信
-				(some h:IfNoneMatchHeader | h in tr'.request.headers)
+				(some h:IfNoneMatchHeader | h in str'.request.headers)
 			(some h:LastModifiedHeader | h in tar_res.headers) implies	//格納レスポンスがLastModifiedHeaderを持っていた場合、IfModifiedSinceHeaderを付けて送信
-				(some h:IfModifiedSinceHeader | h in tr'.request.headers)
+				(some h:IfModifiedSinceHeader | h in str'.request.headers)
 		}
 
 	}
@@ -185,8 +185,8 @@ fact ConditionalRequestTransaction{
 				res.uri = tr.response.uri
 				one cs:CacheState |
 				{
-					res in cs.store
-					cs.cache = tr.request.from.cache
+					res in cs.dif.store
+					cs.eq.cache = tr.request.from.cache
 					cs in tr.afterState
 				}
 			}
@@ -198,16 +198,16 @@ fact ConditionalRequestTransaction{
 			tr.response.statusCode = c200 implies
 			{
 				all cs:CacheState |
-					(cs in tr.afterState and cs.cache = tr.response.to.cache) implies
-						tr.response in cs.store
+					(cs in tr.afterState and cs.eq.cache = tr.response.to.cache) implies
+						tr.response in cs.dif.store
 			}
 
 			//再利用可(c304)である場合、検証結果のレスポンスは格納されない（既に格納済みであったレスポンスのうち一つが残る）
 			tr.response.statusCode = c304 implies
 			{
 				all cs:CacheState |
-					(cs in tr.afterState and cs.cache = tr.response.to.cache) implies
-						tr.response !in cs.store
+					(cs in tr.afterState and cs.eq.cache = tr.response.to.cache) implies
+						tr.response !in cs.dif.store
 			}
 		}
 }
@@ -256,15 +256,15 @@ fact noOrphanedHeaders {
 //CacheControlHeaderのオプションに関する制限
 fact CCHeaderOption{
 	//for "no-cache"
-	all tr:CacheTransaction |
-		(some op:NoCache | op in (tr.request.headers.options + tr.re_res.target.headers.options)) implies
-			some tr.re_res implies
-				checkVerification[tr]
+	all str:StateTransaction |
+		(some op:NoCache | op in (str.request.headers.options + str.re_res.target.headers.options)) implies
+			some str.re_res implies
+				checkVerification[str]
 
 	//for "no-store"
 	all res:HTTPResponse |
 		(some op:NoStore | op in res.headers.options) implies
-			all cs:CacheState | res !in cs.store
+			all cs:CacheState | res !in cs.dif.store
 
 	/*
 	//for only-if-cached
@@ -280,9 +280,8 @@ fact CCHeaderOption{
 	//for "private"
 	all res:HTTPResponse |
 		(some op:Private | op in res.headers.options) implies
-			all cs:CacheState | res in cs.store implies cs.cache in PrivateCache
+			all cs:CacheState | res in cs.dif.store implies cs.eq.cache in PrivateCache
 }
-
 
 /****************************
 
@@ -310,142 +309,73 @@ fact PublicAndPrivate{
 	all pub:PublicCache | (pub in HTTPServer.cache) or (pub in HTTPIntermediary.cache)
 }
 
-sig CacheTransaction extends HTTPTransaction{
-	beforeState: set CacheState,
-	afterState: set CacheState
-}{
-	#beforeState <= 2
-	#afterState <= 2
+sig CacheState extends State{}{
+	eq in CacheEqItem
+	dif in CacheDifItem
 
-	beforeState.cache = request.from.cache + request.to.cache
-	afterState.cache = beforeState.cache
-}
-
-sig CacheState{
-	p: set CacheState,
-	cache: one Cache,
-	store: set HTTPResponse,
-	current: set Time
-}{
-	cache in PrivateCache implies
-        all res:HTTPResponse | res in store implies
+	eq.cache in PrivateCache implies
+        all res:HTTPResponse | res in dif.store implies
                 {
                     (one op:Maxage | op in res.headers.options) or
                     (one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
                 }
 
-    cache in PublicCache implies
-        all res:HTTPResponse | res in store implies
+    eq.cache in PublicCache implies
+        all res:HTTPResponse | res in dif.store implies
                 {
                     (one op:Maxage | op in res.headers.options) or
                     (one op:SMaxage | op in res.headers.options) or
                     (one d:DateHeader, e:ExpiresHeader | d in res.headers and e in res.headers)
                 }
 
-    all res:HTTPResponse | res in store implies
+    all res:HTTPResponse | res in dif.store implies
         one h:AgeHeader | h in res.headers
 }
-
-//すべてのCacheStateはいずれかのTransactionに含まれる
-fact noOrphanedCacheState{
-	all cs:CacheState | cs in CacheTransaction.(beforeState + afterState)
+sig CacheEqItem extends EqItem{
+	cache: one Cache
 }
-
-//あるcs:CacheStateがtr.beforeに含まれる <=> cの時間にtr.reqが含まれる
-//あるcs:CacheStateがtr.afterに含まれる <=> cの時間にtr.resが含まれる
-fact CacheStateTime{
-	all cs:CacheState |
-		all tr:CacheTransaction |
-			{
-				cs in tr.beforeState iff tr.request.current in cs.current
-				cs in tr.afterState iff tr.(response + re_res).current in cs.current
-			}
-
-	all t:Time |
-		t in CacheState.current implies t in CacheTransaction.(request + response + re_res).current
+sig CacheDifItem extends DifItem{
+	store: set HTTPResponse
 }
 
 //同じタイミングで同一のキャッシュに対するキャッシュ状態は存在しない
 //同じキャッシュで同じ状態のキャッシュ状態は存在しない（統合する）
 fact noMultipleCacheState{
-	all tr:CacheTransaction |
+	all str:StateTransaction |
 		all disj cs,cs':CacheState |
-			cs.cache = cs'.cache implies
+			cs.eq.cache = cs'.eq.cache implies
 				{
-					cs in tr.beforeState implies cs' !in tr.beforeState
-					cs in tr.afterState implies cs' !in tr.afterState
+					cs in str.beforeState implies cs' !in str.beforeState
+					cs in str.afterState implies cs' !in str.afterState
 				}
 
 	no disj cs,cs':CacheState |
 		{
-			cs.cache = cs'.cache
-			cs.store = cs'.store
+			cs.eq.cache = cs'.eq.cache
+			cs.dif.store = cs'.dif.store
 		}
 }
 
 //キャッシュを持つ端末のTransactionは必ずCacheTransactionである
 //キャッシュを持たない端末のTransactionは必ずCacheTransactionでない
-fact {
+fact ExistCacheTransaction{
 	all tr:HTTPTransaction |
-		some tr.request.(from + to).cache iff tr in CacheTransaction
+		some tr.request.(from + to).cache iff tr in StateTransaction
 }
 
 fact flowCacheState{
 	//初期状態のstoreをnullにする
 	all cs:CacheState |
-		checkFirstCacheState[cs] implies
-			no cs.store
+		FirstState[cs] implies
+			no cs.dif.store
 
-	//直前のキャッシュの状態を継承する（responseの場合は追加可能）
-	all pre, post:CacheState, tr:CacheTransaction |
-		{
-			checkNewestCacheStateBefore[pre, post, tr] implies
-				post.store in pre.store
-			checkNewestCacheStateAfter[pre, post, tr] implies
-				post.store in (pre.store + tr.response)
+	//直前のキャッシュの状態を継承する（responseの場合はそれを格納可能）
+	all pre, post:CacheState, str:StateTransaction |
+		JustBeforeState[pre, post, str] implies {
+			post in str.beforeState implies post.dif.store in pre.dif.store
+			post in str.afterState implies pre.dif.store in (pre.dif.store + str.response)
 		}
 }
-
-//preがpostの直前の状態か確認(postがbeforeStateの場合)
-pred checkNewestCacheStateBefore[pre:CacheState, post:CacheState, tr:CacheTransaction]{
-	pre.cache = post.cache
-	post in tr.beforeState
-
-	some t,t':Time |
-		{
-			t in pre.current	//t:pre
-			t' = tr.request.current	//t':post
-			t' in t.next.*next	//pre -> post
-
-			all cs:CacheState, t'':Time |
-				(cs.cache = pre.cache and t'' in cs.current) implies	//t'':cs
-						(t in t''.*next) or (t'' in t'.*next)	//cs => pre (or) post => cs
-		}
-}
-
-//preがpostの直前の状態か確認(postがafterStateの場合)
-pred checkNewestCacheStateAfter[pre:CacheState, post:CacheState, tr:CacheTransaction]{
-	pre.cache = post.cache
-	post in tr.afterState
-
-	some t,t':Time |
-		{
-			t in pre.current	//t:pre
-			t' = tr.(response + re_res).current	//t':post
-			t' in t.next.*next	//pre -> post
-
-			all cs:CacheState, t'':Time |
-				(cs.cache = pre.cache and t'' in cs.current) implies	//t'':cs
-						(t in t''.*next) or (t'' in t'.*next)	//cs => pre (or) post => cs
-		}
-}
-
-pred checkFirstCacheState[cs:CacheState]{
-	all cs':CacheState |
-		cs.cache = cs'.cache implies
-			cs'.current in cs.current.*next	//cs => cs'
-}
-
 
 /************************
 
@@ -910,6 +840,71 @@ fact HTTPTransactionsAreSane {
 	all disj t,t':HTTPTransaction | no (t.response & t'.response ) and no (t.request & t'.request)
 }
 
+/***********************
+
+State
+
+************************/
+abstract sig State{
+	eq: one EqItem,
+	dif: one DifItem,
+	current: set Time
+}
+
+abstract sig EqItem{}
+abstract sig DifItem{}
+
+fact StateCurrentTime{
+	all s:State |
+		all str:StateTransaction |
+			{
+				s in str.beforeState iff str.request.current in s.current
+				s in str.afterState iff str.(response + re_res).current in s.current
+			}
+
+	all t:Time |
+		t in State.current implies t in StateTransaction.(request + response + re_res).current
+}
+
+sig StateTransaction extends HTTPTransaction{
+	beforeState: set State,
+	afterState: set State
+}
+
+fact CacheStateInTransaction{
+	all str:StateTransaction |{
+		str.beforeState.cache = str.request.(from + to).cache
+		str.afterState.cache = str.beforeState.cache
+	}
+}
+
+fact noOrphanedState{
+	all s:State | s in StateTransaction.(beforeState + afterState)
+}
+
+//preがpostの直前の状態か確認
+pred JustBeforeState[pre:State, post:State, str:StateTransaction]{
+	pre.eq = post.eq
+	post in str.(beforeState + afterState)
+
+	some t,t':Time |
+		{
+			//t:pre, t':post, pre->post
+			t in pre.current	//t:pre
+			(post in str.beforeState implies t' = str.request.current) or (post in str.afterState implies t' = str.(response + re_res).current)
+			t' in t.next.*next	//pre -> post
+
+			all s:State, t'':Time |
+				(s.eq = pre.eq and t'' in s.current) implies	//t'':cs
+						(t in t''.*next) or (t'' in t'.*next)	//cs => pre (or) post => cs
+		}
+}
+
+pred FirstState[s:State]{
+	all s':State |
+		s.eq = s'.eq implies
+			s'.current in s.current.*next	//cs => cs'
+}
 
 /***********************
 
