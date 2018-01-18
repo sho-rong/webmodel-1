@@ -20,7 +20,7 @@ run test_store2{
 	#HTTPRequest = 2
 	#HTTPResponse = 2
 
-	some cs:CacheState | #(cs.dif.store) > 1
+	some cs:CacheState | #(cs.dif.store) = 2
 } for 4
 
 //再利用を観測
@@ -32,7 +32,6 @@ run test_reuse{
 	#HTTPRequest = 2
 	#HTTPResponse = 1
 	#CacheReuse = 1
-
 } for 4
 
 //検証を観測
@@ -72,3 +71,45 @@ run checkNoCacheOption{
 
 	no str:StateTransaction | checkVerification[str]
 }
+
+//same orgin BCP Attack
+run test_bcp{
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#HTTPIntermediary = 1
+	#PrivateCache = 1
+	#PublicCache = 0
+
+	#HTTPRequest = 3
+	#HTTPResponse = 2
+	#CacheReuse = 1
+
+	#Principal = 3
+	#Alice = 2
+	#PASSIVEATTACKER = 1
+
+	some tr,tr',tr'':HTTPTransaction | {
+		//tr.req => tr'.req => tr'.res => tr.res => tr''.req => tr''.reuse
+		tr'.request.current in tr.request.current.*next
+		tr.response.current in tr'.response.current.*next
+		tr''.request.current in tr.response.current.*next
+		some tr''.re_res
+
+		//tr: client <-> intermediary
+		tr.request.from in HTTPClient
+		tr.request.to in HTTPIntermediary
+
+		//tr': intermediary <-> server
+		tr'.request.from in HTTPIntermediary
+		tr'.request.to in HTTPServer
+
+		//tr'': client <-> ?
+		tr''.request.from in HTTPClient
+
+		tr.response.body != tr'.response.body
+	}
+
+	some c:HTTPClient | c in Alice.httpClients
+	some s:HTTPServer | s in Alice.servers
+	no i:HTTPIntermediary | i in Alice.servers
+} for 6

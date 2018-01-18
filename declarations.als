@@ -116,7 +116,7 @@ fact happenCacheReuse{
 			reuse.to = str.request.from
 			reuse.from in str.request.(from + to)
 
-			all pre, post:CacheState |
+			some pre, post:CacheState |
 				(post in str.afterState and JustBeforeState[pre, post, str]) implies
 					{
 						reuse.target in pre.dif.store
@@ -303,7 +303,7 @@ fact noMultipleCaches {
 	all ep:NetworkEndpoint | lone c:Cache | c in ep.cache
 }
 
-//PrivateCacheとPrivateCacheの場所を指定
+//PrivateCacheとPrivateCacheの場所の制限
 fact PublicAndPrivate{
 	all pri:PrivateCache | pri in HTTPClient.cache
 	all pub:PublicCache | (pub in HTTPServer.cache) or (pub in HTTPIntermediary.cache)
@@ -331,36 +331,26 @@ sig CacheState extends State{}{
     all res:HTTPResponse | res in dif.store implies
         one h:AgeHeader | h in res.headers
 }
-sig CacheEqItem extends EqItem{
-	cache: one Cache
-}
-sig CacheDifItem extends DifItem{
-	store: set HTTPResponse
-}
+sig CacheEqItem extends EqItem{cache: one Cache}
+sig CacheDifItem extends DifItem{store: set HTTPResponse}
 
-//同じタイミングで同一のキャッシュに対するキャッシュ状態は存在しない
-//同じキャッシュで同じ状態のキャッシュ状態は存在しない（統合する）
-fact noMultipleCacheState{
-	all str:StateTransaction |
-		all disj cs,cs':CacheState |
-			cs.eq.cache = cs'.eq.cache implies
-				{
-					cs in str.beforeState implies cs' !in str.beforeState
-					cs in str.afterState implies cs' !in str.afterState
-				}
-
-	no disj cs,cs':CacheState |
-		{
-			cs.eq.cache = cs'.eq.cache
-			cs.dif.store = cs'.dif.store
-		}
+//同じ内容のCacheEqItem, CacheDifItemは統合される
+fact noMultipleItems{
+	no disj i,i':CacheEqItem | i.cache = i'.cache
+	no disj i,i':CacheDifItem | i.store = i'.store
 }
 
-//キャッシュを持つ端末のTransactionは必ずCacheTransactionである
-//キャッシュを持たない端末のTransactionは必ずCacheTransactionでない
-fact ExistCacheTransaction{
+//キャッシュを持つ端末を含むTransaction => StateTransactionである
+//すべてのStateTransactionは、リクエストのfrom/toに含まれるキャッシュの状態をbeforeStateに持つ
+//すべてのStateTransactionは、レスポンスor再利用を持つ場合、beforeStateで状態を持っているキャッシュの状態をafterStateに持つ
+fact CacheInTransaction{
 	all tr:HTTPTransaction |
-		some tr.request.(from + to).cache iff tr in StateTransaction
+		(some tr.request.(from + to).cache implies tr in StateTransaction)
+
+	all str:StateTransaction |{
+		str.beforeState.eq.cache = str.request.(from + to).cache
+		some str.(request + re_res) implies str.afterState.eq.cache = str.beforeState.eq.cache
+	}
 }
 
 fact flowCacheState{
@@ -373,7 +363,7 @@ fact flowCacheState{
 	all pre, post:CacheState, str:StateTransaction |
 		JustBeforeState[pre, post, str] implies {
 			post in str.beforeState implies post.dif.store in pre.dif.store
-			post in str.afterState implies pre.dif.store in (pre.dif.store + str.response)
+			post in str.afterState implies post.dif.store in (pre.dif.store + str.response)
 		}
 }
 
@@ -644,6 +634,7 @@ sig HTTPTransaction {
 
 fact limitHTTPTransaction{
 	all req:HTTPRequest | lone t:HTTPTransaction | t.request = req
+	all res:HTTPResponse | lone t:HTTPTransaction | t.response = res
 	all reuse:CacheReuse | lone t:HTTPTransaction | t.re_res = reuse
 	no t:HTTPTransaction |
 		some t.response and some t.re_res
@@ -848,14 +839,59 @@ State
 
 ************************/
 abstract sig State{
+	flow: set State,
 	eq: one EqItem,
 	dif: one DifItem,
 	current: set Time
 }
 
+//同じeqをもつ => 同じbefore/afterStateに存在しない
+//同じeq,difを持つStateは存在しない
+fact noMultipleState{
+	all str:StateTransaction |
+		all disj s,s':CacheState |
+			s.eq = s'.eq implies
+				{
+					s in str.beforeState implies s' !in str.beforeState
+					s in str.afterState implies s' !in str.afterState
+				}
+
+	no disj s,s':State |{
+		s.eq = s'.eq
+		s.dif = s'.dif
+	}
+}
+
 abstract sig EqItem{}
 abstract sig DifItem{}
 
+sig StateTransaction extends HTTPTransaction{
+	beforeState: set State,
+	afterState: set State
+}
+
+//すべてのStateは、どこかのbefore/afterStateに属する
+//すべてのStateTransactionは、before/afterStateにStateを持つ
+//使用されていないEq/DifItemは存在しない
+fact noOrphanedStates{
+	all s:State | s in StateTransaction.(beforeState + afterState)
+	all str:StateTransaction | some str.(beforeState + afterState)
+	all i:EqItem | i in State.eq
+	all i:DifItem | i in State.dif
+}
+
+//flowに関する条件
+fact catchStateFlow{
+	all pre,post:State, str:StateTransaction |
+		JustBeforeState[pre, post, str] implies
+			post in pre.flow
+	all s,s':State |
+		s' in s.flow implies
+			(some str:StateTransaction | JustBeforeState[s, s', str])
+}
+
+//StateがbeforeStateに属する <=> Stateがリクエストの時間を持つ
+//StateがafterStateに属する <=> Stateがレスポンスの時間を持つ
 fact StateCurrentTime{
 	all s:State |
 		all str:StateTransaction |
@@ -868,22 +904,6 @@ fact StateCurrentTime{
 		t in State.current implies t in StateTransaction.(request + response + re_res).current
 }
 
-sig StateTransaction extends HTTPTransaction{
-	beforeState: set State,
-	afterState: set State
-}
-
-fact CacheStateInTransaction{
-	all str:StateTransaction |{
-		str.beforeState.cache = str.request.(from + to).cache
-		str.afterState.cache = str.beforeState.cache
-	}
-}
-
-fact noOrphanedState{
-	all s:State | s in StateTransaction.(beforeState + afterState)
-}
-
 //preがpostの直前の状態か確認
 pred JustBeforeState[pre:State, post:State, str:StateTransaction]{
 	pre.eq = post.eq
@@ -891,67 +911,23 @@ pred JustBeforeState[pre:State, post:State, str:StateTransaction]{
 
 	some t,t':Time |
 		{
-			//t:pre, t':post, pre->post
-			t in pre.current	//t:pre
-			(post in str.beforeState implies t' = str.request.current) or (post in str.afterState implies t' = str.(response + re_res).current)
-			t' in t.next.*next	//pre -> post
+			//t:pre, t':post
+			//pre->post
+			t in pre.current
+			t' in str.(request + response + re_res).current
+			t' in str.request.current implies post in str.beforeState
+			t' in str.(response + re_res).current implies post in str.afterState
+			t' in t.next.*next
 
 			all s:State, t'':Time |
-				(s.eq = pre.eq and t'' in s.current) implies	//t'':cs
-						(t in t''.*next) or (t'' in t'.*next)	//cs => pre (or) post => cs
+				(s.eq = pre.eq and t'' in s.current) implies	//t'':s
+						(t in t''.*next) or (t'' in t'.*next)	//s => pre (or) post => cs
 		}
 }
 
+//sが初期状態か確認
 pred FirstState[s:State]{
 	all s':State |
 		s.eq = s'.eq implies
-			s'.current in s.current.*next	//cs => cs'
+			s'.current in s.current.*next	//s => s'
 }
-
-/***********************
-
-Test Code
-
-************************/
-
-//same orgin BCP Attack
-run test_bcp{
-	#HTTPClient = 1
-	#HTTPServer = 1
-	#HTTPIntermediary = 1
-	#PrivateCache = 1
-	#PublicCache = 0
-
-	#HTTPRequest = 3
-	#HTTPResponse = 2
-	#CacheReuse = 1
-
-	#Principal = 3
-	#Alice = 2
-	#PASSIVEATTACKER = 1
-
-	some tr,tr',tr'':HTTPTransaction | {
-		//tr.req => tr'.req => tr'.res => tr.res => tr''.req => tr''.reuse
-		tr'.request.current in tr.request.current.*next
-		tr.response.current in tr'.response.current.*next
-		tr''.request.current in tr.response.current.*next
-		some tr''.re_res
-
-		//tr: client <-> intermediary
-		tr.request.from in HTTPClient
-		tr.request.to in HTTPIntermediary
-
-		//tr': intermediary <-> server
-		tr'.request.from in HTTPIntermediary
-		tr'.request.to in HTTPServer
-
-		//tr'': client <-> ?
-		tr''.request.from in HTTPClient
-
-		tr.response.body != tr'.response.body
-	}
-
-	some c:HTTPClient | c in Alice.httpClients
-	some s:HTTPServer | s in Alice.servers
-	no i:HTTPIntermediary | i in Alice.servers
-} for 6
