@@ -844,6 +844,13 @@ abstract sig State{
 	dif: one DifItem,
 	current: set Time
 }
+abstract sig EqItem{}
+abstract sig DifItem{}
+
+sig StateTransaction extends HTTPTransaction{
+	beforeState: set State,
+	afterState: set State
+}
 
 //同じeqをもつ => 同じbefore/afterStateに存在しない
 //同じeq,difを持つStateは存在しない
@@ -860,14 +867,6 @@ fact noMultipleState{
 		s.eq = s'.eq
 		s.dif = s'.dif
 	}
-}
-
-abstract sig EqItem{}
-abstract sig DifItem{}
-
-sig StateTransaction extends HTTPTransaction{
-	beforeState: set State,
-	afterState: set State
 }
 
 //すべてのStateは、どこかのbefore/afterStateに属する
