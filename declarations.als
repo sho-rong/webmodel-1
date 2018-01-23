@@ -237,7 +237,7 @@ abstract sig CacheOption{}
 abstract sig RequestCacheOption extends CacheOption{}
 abstract sig ResponseCacheOption extends CacheOption{}
 sig Maxage,NoCache,NoStore,NoTransform extends CacheOption{}
-sig MaxStale,MinStale,OnlyIfCached extends RequestCacheOption{}
+sig MaxStale,MinFresh,OnlyIfCached extends RequestCacheOption{}
 sig MustRevalidate,Public,Private,ProxyRevalidate,SMaxage extends ResponseCacheOption{}
 
 //どのリクエスト・レスポンスにも属さないヘッダは存在しない
