@@ -82,7 +82,10 @@ sig HTTPRequest extends HTTPEvent {
 sig HTTPResponse extends HTTPEvent {
 	statusCode: one Status
 }
-sig CacheReuse extends NetworkEvent{target: one HTTPResponse}
+sig CacheReuse extends NetworkEvent{target: one HTTPResponse}{
+	no headers
+	no body
+}
 
 //firstがsecondよりも前に発生しているか確認
 pred happensBefore[first:Event,second:Event]{
@@ -110,8 +113,6 @@ fact happenResponse{
 fact happenCacheReuse{
 	all reuse:CacheReuse | one str:StateTransaction |
 		{
-			happensBefore[reuse.target, reuse]
-
 			str.re_res = reuse
 			reuse.to = str.request.from
 			reuse.from in str.request.(from + to)
@@ -144,33 +145,16 @@ pred checkVerification[str:StateTransaction]{
 		str'.request.to = str.re_res.target.from
 		str'.request.uri = str.request.uri
 
-		//検証可能なレスポンスがtr.request時点で格納されている
-		some tar_res:HTTPResponse |
-		{
-			tar_res.uri = str.request.uri
-
-			//検証対象のレスポンスがtr.request時点で格納されている
-			one cs:CacheState |
-			{
-				cs in str.beforeState
-				cs.eq.cache = str.re_res.from.cache
-				tar_res in cs.dif.store
-			}
-
-			//検証対象のレスポンスに必要なヘッダが含まれている
-			some h:HTTPHeader |
-			{
-				h in ETagHeader + LastModifiedHeader
-				h in tar_res.headers
-			}
-
-			//格納レスポンスのヘッダに適した条件付きリクエストのヘッダを生成
-			(some h:ETagHeader | h in tar_res.headers) implies	//格納レスポンスがETagHeaderを持っていた場合、IfNoneMatchHeaderを付けて送信
-				(some h:IfNoneMatchHeader | h in str'.request.headers)
-			(some h:LastModifiedHeader | h in tar_res.headers) implies	//格納レスポンスがLastModifiedHeaderを持っていた場合、IfModifiedSinceHeaderを付けて送信
-				(some h:IfModifiedSinceHeader | h in str'.request.headers)
+		some h:HTTPHeader |{
+			h in ETagHeader + LastModifiedHeader
+			h in str.re_res.target.headers
 		}
 
+		//格納レスポンスのヘッダに適した条件付きリクエストのヘッダを生成
+		(some h:ETagHeader | h in str.re_res.headers) implies	//格納レスポンスがETagHeaderを持っていた場合、IfNoneMatchHeaderを付けて送信
+			(some h:IfNoneMatchHeader | h in str'.request.headers)
+		(some h:LastModifiedHeader | h in str.re_res.headers) implies	//格納レスポンスがLastModifiedHeaderを持っていた場合、IfModifiedSinceHeaderを付けて送信
+			(some h:IfModifiedSinceHeader | h in str'.request.headers)
 	}
 }
 
@@ -296,11 +280,6 @@ sig PublicCache extends Cache{}
 fact noOrphanedCaches {
 	all c:Cache |
 		one e:NetworkEndpoint | c = e.cache
-}
-
-//同じ端末に2つ以上のキャッシュは存在しない
-fact noMultipleCaches {
-	all ep:NetworkEndpoint | lone c:Cache | c in ep.cache
 }
 
 //PrivateCacheとPrivateCacheの場所の制限
