@@ -72,8 +72,8 @@ run checkNoCacheOption{
 	no str:StateTransaction | checkVerification[str]
 }
 
-//same orgin BCP Attack
-run test_bcp{
+//Same-orgin BCP Attack
+run Same_origin_BCP{
 	#HTTPClient = 1
 	#HTTPServer = 1
 	#HTTPIntermediary = 1
