@@ -113,3 +113,131 @@ run Same_origin_BCP{
 	some s:HTTPServer | s in Alice.servers
 	no i:HTTPIntermediary | i in Alice.servers
 } for 6
+
+//Cross-origin BCP Attack
+run Cross_origin_BCP{
+	#HTTPRequest = 4
+	#HTTPResponse = 3
+	#CacheReuse = 1
+
+	#Browser = 2
+	#HTTPServer = 1
+	#HTTPProxy = 2
+	#Cache = 1
+
+	#Principal = 5
+	#Alice = 4
+
+	//キャッシュはAliceの所有するプロキシの唯一存在
+	all c:Cache | c in Alice.servers.cache and c in HTTPIntermediary.cache
+
+	//端末の所有者を設定
+	all p:Principal |	//全てのユーザは一つの端末しか管理しない
+		one c:HTTPConformist |
+			c in p.(servers + httpClients)
+	all b:Browser | b in Alice.httpClients	//全てのBrowserはAliceに管理される
+	all b:HTTPServer | b in Alice.servers	//全てのServerはAliceに管理される
+
+	//通信イベントを作成
+	one tr1,tr2,tr3,tr4:HTTPTransaction |{
+		//tr1 client1 <-> proxy1
+		tr1.request.from in HTTPClient
+		(tr1.request.to in HTTPProxy and tr1.request.to in Alice.servers)
+
+		//tr2 proxy1 <-> proxy2(Attacker's)
+		(tr2.request.from in HTTPProxy and tr2.request.from in Alice.servers)
+		(tr2.request.to in HTTPProxy and tr2.request.to !in Alice.servers)
+
+		//tr3 proxy2 <-> Server
+		(tr3.request.from in HTTPProxy and tr3.request.from !in Alice.servers)
+		tr3.request.to in HTTPServer
+
+		//tr4 client2 <-> proxy1
+		tr4.request.from in HTTPClient
+		(tr4.request.to in HTTPProxy and tr4.request.to in Alice.servers)
+		tr4.request.from != tr1.request.from
+		one tr4.re_res
+
+		//トランザクションの発生順序
+		tr2.request.current in tr1.request.current.*next
+		tr3.request.current in tr2.request.current.*next
+		tr2.response.current in tr3.response.current.*next
+		tr1.response.current in tr2.response.current.*next
+		tr4.request.current in tr1.response.current.*next
+
+		//Attackerによるレスポンス改変
+		tr2.response.body != tr3.response.body
+	}
+} for 8
+
+//Cross Site Request Forgery
+run CSRF{
+	#HTTPRequest = 2
+	#HTTPResponse = 2
+
+	#HTTPClient = 1
+	#HTTPServer = 2
+	#HTTPIntermediary = 0
+
+	#Principal = 3
+	#Alice = 2
+
+	all p:Principal |
+		one c:HTTPConformist |
+			c in p.(servers + httpClients)
+	all b:Browser | b in Alice.httpClients
+
+	one tr1,tr2:HTTPTransaction|{
+		//トランザクションの発生順序
+		tr2.request.current in tr1.response.current.*next
+
+		//tr1 client <-> server1(Attacker's)
+		//tr2 client <-> server2
+		tr1.request.to !in Alice.servers
+		tr2.request.to in Alice.servers
+
+		//tr1によってtr2が発生
+		tr2.cause = tr1
+
+		tr1.request.uri != tr2.request.uri
+	}
+} for 4
+
+//Web Cache Deception Attack
+run Web_Cache_Deception{
+	#HTTPRequest = 3
+	#HTTPResponse = 2
+	#CacheReuse = 1
+
+	#HTTPClient = 2
+	#HTTPServer = 1
+	#HTTPProxy = 1
+	#Cache = 1
+
+	#Principal = 4
+	#Alice = 3
+
+	all c:Cache | c in HTTPProxy.cache
+
+	all p:Principal |
+		one c:HTTPConformist |
+			c in p.(servers + httpClients)
+	all i:HTTPProxy | i in Alice.servers
+	all s:HTTPServer | s in Alice.servers
+
+	one tr1,tr2,tr3:HTTPTransaction |{
+		//tr1 client1 <-> proxy
+		tr1.request.from in Alice.httpClients
+		tr1.request.to in HTTPProxy
+
+		//tr2 proxy <-> server
+		tr2.request.from in HTTPProxy
+		tr2.request.to in HTTPServer
+
+		//tr3 client2(Attacker's) <-> proxy
+		(tr3.request.from !in Alice.httpClients and tr3.request.from in HTTPClient)
+		tr3.request.to in HTTPProxy
+
+		one tr3.re_res
+	}
+} for 6

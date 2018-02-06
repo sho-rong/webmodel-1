@@ -28,19 +28,20 @@ sig HTTPGateway extends HTTPIntermediary{}
 
 fact MoveOfIntermediary{
 	all tr:HTTPTransaction |{
-		tr.request.to in HTTPIntermediary and one tr.response implies{	//応答を行う場合、その応答を得る別のトランザクションがリクエストとレスポンスの間に存在する
+		//通常のユーザ + WEBATTACKERが所有する中継者のふるまい
+		//応答を行う場合、その応答を得る別のトランザクションがリクエストとレスポンスの間に存在する
+		(tr.request.to in HTTPIntermediary) and (tr.request.to in WebPrincipal.servers) and (one tr.response) implies{
 			some tr':HTTPTransaction |{
+				tr != tr'
+
 				//tr.req -> tr'.req -> tr'.res -> tr.res
 				tr'.request.current in tr.request.current.*next
 				tr.response.current in tr'.response.current.*next
 
-				//通常のユーザ + WEBATTACKERが所有する中継者のふるまい
-				tr.request.to in WebPrincipal.servers implies{
-					tr'.request.from = tr.request.to
-					tr'.request.uri = tr.request.uri
-					tr.response.body = tr'.response.body
-					tr.response.statusCode = tr'.response.statusCode
-				}
+				tr'.request.from = tr.request.to
+				tr'.request.uri = tr.request.uri
+				tr.response.body = tr'.response.body
+				tr.response.statusCode = tr'.response.statusCode
 			}
 		}
 	}
@@ -64,6 +65,8 @@ abstract sig Event {current : one Time}
 abstract sig NetworkEvent extends Event {
 	from: NetworkEndpoint,
 	to: NetworkEndpoint
+}{
+	from != to
 }
 
 abstract sig HTTPEvent extends NetworkEvent {
@@ -82,10 +85,7 @@ sig HTTPRequest extends HTTPEvent {
 sig HTTPResponse extends HTTPEvent {
 	statusCode: one Status
 }
-sig CacheReuse extends NetworkEvent{target: one HTTPResponse}{
-	no headers
-	no body
-}
+sig CacheReuse extends NetworkEvent{target: one HTTPResponse}{}
 
 //firstがsecondよりも前に発生しているか確認
 pred happensBefore[first:Event,second:Event]{
@@ -473,6 +473,12 @@ abstract sig NormalPrincipal extends WebPrincipal{} { 	dnslabels.resolvesTo in s
 lone sig GOOD extends NormalPrincipal{}
 lone sig SECURE extends NormalPrincipal{}
 lone sig ORIGINAWARE extends NormalPrincipal{}
+
+fact noOrphanedPoint{
+	all e:NetworkEndpoint |
+		one p:Principal |
+			e in p.(servers + httpClients)
+}
 
 fact NonActiveFollowHTTPRules {
 // Old rule was :
@@ -909,129 +915,3 @@ pred FirstState[s:State]{
 		s.eq = s'.eq implies
 			s'.current in s.current.*next	//s => s'
 }
-
-
-/***********************
-
-Test Code
-
-************************/
-//Cross-origin BCP Attack
-run Cross_origin_BCP{
-	#HTTPRequest = 4
-	#HTTPResponse = 3
-	#CacheReuse = 1
-
-	#Browser = 2
-	#HTTPServer = 1
-	#HTTPProxy = 2
-	#Cache = 1
-
-	#Principal = 5
-	#Alice = 4
-
-	//キャッシュはAliceの所有するプロキシの唯一存在
-	all c:Cache | c in Alice.servers.cache and c in HTTPIntermediary.cache
-
-	//端末の所有者を設定
-	all p:Principal |	//全てのユーザは一つの端末しか管理しない
-		one c:HTTPConformist |
-			c in p.(servers + httpClients)
-	all b:Browser | b in Alice.httpClients	//全てのBrowserはAliceに管理される
-	all b:HTTPServer | b in Alice.servers	//全てのServerはAliceに管理される
-
-	//通信イベントを作成
-	one tr1,tr2,tr3,tr4:HTTPTransaction |{
-		//tr1 client1 <-> proxy1
-		tr1.request.from in HTTPClient
-		(tr1.request.to in HTTPProxy and tr1.request.to in Alice.servers)
-
-		//tr2 proxy1 <-> proxy2(Attacker's)
-		(tr2.request.from in HTTPProxy and tr2.request.from in Alice.servers)
-		(tr2.request.to in HTTPProxy and tr2.request.to !in Alice.servers)
-
-		//tr3 proxy2 <-> Server
-		(tr3.request.from in HTTPProxy and tr3.request.from !in Alice.servers)
-		tr3.request.to in HTTPServer
-
-		//tr4 client2 <-> proxy1
-		tr4.request.from in HTTPClient
-		(tr4.request.to in HTTPProxy and tr4.request.to in Alice.servers)
-		tr4.request.from != tr1.request.from
-		one tr4.re_res
-
-		//トランザクションの発生順序
-		tr2.request.current in tr1.request.current.*next
-		tr3.request.current in tr2.request.current.*next
-		tr4.request.current in tr3.response.current.*next
-
-		//Attackerによるレスポンス改変
-		tr2.response.body != tr3.response.body
-	}
-} for 8
-
-//Cross Site Request Forgery
-run CSRF{
-	#HTTPRequest = 2
-	#HTTPResponse = 2
-
-	#HTTPClient = 1
-	#HTTPServer = 2
-
-	#Principal = 3
-	#Alice = 2
-
-	all p:Principal |
-		one c:HTTPConformist |
-			c in p.(servers + httpClients)
-	all b:Browser | b in Alice.httpClients
-
-	one tr1,tr2:HTTPTransaction|{
-		//トランザクションの発生順序
-		tr2.request.current in tr1.response.current.*next
-
-		//tr1 client <-> server1(Attacker's)
-		//tr2 client <-> server2
-		tr1.request.to !in Alice.servers
-		tr2.request.to in Alice.servers
-	}
-} for 4
-
-//Web Cache Deception Attack
-run WCD{
-	#HTTPRequest = 3
-	#HTTPResponse = 2
-	#CacheReuse = 1
-
-	#HTTPClient = 2
-	#HTTPServer = 1
-	#HTTPProxy = 1
-	#Cache = 1
-
-	#Principal = 4
-	#Alice = 3
-
-	all c:Cache | c in HTTPProxy.cache
-
-	all p:Principal |
-		one c:HTTPConformist |
-			c in p.(servers + httpClients)
-	all i:HTTPProxy | i in Alice.servers
-	all s:HTTPServer | s in Alice.servers
-
-	one tr1,tr2,tr3:HTTPTransaction |{
-		one tr3.re_res
-
-		//tr1 client1 <-> proxy
-		tr1.request.from in Alice.httpClients
-		tr1.request.to in HTTPProxy
-
-		//tr2 proxy <-> server
-		tr2.request.from in HTTPProxy
-		tr2.request.to in HTTPServer
-
-		//tr3 client2(Attacker's) <-> HTTPProxy
-		(tr3.request.from !in Alice.httpClients and tr3.request.from in HTTPClient)
-		tr3.request.to in HTTPProxy
-	}
-} for 6
