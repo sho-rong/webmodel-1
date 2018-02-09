@@ -118,7 +118,7 @@ fact happenCacheReuse{
 			reuse.from in str.request.(from + to)
 
 			some pre, post:CacheState |
-				(post in str.afterState and JustBeforeState[pre, post, str]) implies
+				(post in str.afterState and LastState[pre, post, str]) implies
 					{
 						reuse.target in pre.dif.store
 						reuse.from.cache = pre.eq.cache
@@ -335,12 +335,12 @@ fact CacheInTransaction{
 fact flowCacheState{
 	//初期状態のstoreをnullにする
 	all cs:CacheState |
-		FirstState[cs] implies
+		InitialState[cs] implies
 			no cs.dif.store
 
 	//直前のキャッシュの状態を継承する（responseの場合はそれを格納可能）
 	all pre, post:CacheState, str:StateTransaction |
-		JustBeforeState[pre, post, str] implies {
+		LastState[pre, post, str] implies {
 			post in str.beforeState implies post.dif.store in pre.dif.store
 			post in str.afterState implies post.dif.store in (pre.dif.store + str.response)
 		}
@@ -867,11 +867,11 @@ fact noOrphanedStates{
 //flowに関する条件
 fact catchStateFlow{
 	all pre,post:State, str:StateTransaction |
-		JustBeforeState[pre, post, str] implies
+		LastState[pre, post, str] implies
 			post in pre.flow
 	all s,s':State |
 		s' in s.flow implies
-			(some str:StateTransaction | JustBeforeState[s, s', str])
+			(some str:StateTransaction | LastState[s, s', str])
 }
 
 //StateがbeforeStateに属する <=> Stateがリクエストの時間を持つ
@@ -889,7 +889,7 @@ fact StateCurrentTime{
 }
 
 //preがpostの直前の状態か確認
-pred JustBeforeState[pre:State, post:State, str:StateTransaction]{
+pred LastState[pre:State, post:State, str:StateTransaction]{
 	pre.eq = post.eq
 	post in str.(beforeState + afterState)
 
@@ -910,7 +910,7 @@ pred JustBeforeState[pre:State, post:State, str:StateTransaction]{
 }
 
 //sが初期状態か確認
-pred FirstState[s:State]{
+pred InitialState[s:State]{
 	all s':State |
 		s.eq = s'.eq implies
 			s'.current in s.current.*next	//s => s'
