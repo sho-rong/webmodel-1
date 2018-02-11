@@ -34,9 +34,6 @@ fact MoveOfIntermediary{
 			some tr':HTTPTransaction |{
 				tr != tr'
 
-				//通信の発生元
-				tr'.cause = tr
-
 				//tr.req -> tr'.req -> tr'.res -> tr.res
 				tr'.request.current in tr.request.current.*next
 				tr.response.current in tr'.response.current.*next

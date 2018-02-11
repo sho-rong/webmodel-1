@@ -337,3 +337,18 @@ run Web_Cache_Deception{
 		one tr3.re_res
 	}
 } for 6
+
+run test_intermediary{
+	#HTTPRequest = 2
+	#HTTPResponse = 2
+
+	#HTTPClient = 1
+	#HTTPServer = 1
+	#HTTPIntermediary = 1
+
+	//中継者の所有者はAliceである
+	all i:HTTPIntermediary | i in Alice.servers
+
+	one req:HTTPRequest | req.to in HTTPIntermediary
+	one req:HTTPRequest | req.to in HTTPServer
+} for 4
