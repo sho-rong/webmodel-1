@@ -86,7 +86,6 @@ run Same_origin_BCP{
 
 	#Principal = 3
 	#Alice = 2
-	#PASSIVEATTACKER = 1
 
 	some tr,tr',tr'':HTTPTransaction | {
 		//tr.req => tr'.req => tr'.res => tr.res => tr''.req => tr''.reuse
@@ -116,57 +115,154 @@ run Same_origin_BCP{
 
 //Cross-origin BCP Attack
 run Cross_origin_BCP{
-	#HTTPRequest = 4
-	#HTTPResponse = 3
+	#HTTPRequest = 5
+	#HTTPResponse = 4
 	#CacheReuse = 1
 
-	#Browser = 2
-	#HTTPServer = 1
-	#HTTPProxy = 2
+	#Browser = 1
+	#HTTPServer = 2
+	#HTTPProxy = 1
 	#Cache = 1
 
-	#Principal = 5
-	#Alice = 4
+	#Principal = 4
+	#Alice = 3
 
-	//キャッシュはAliceの所有するプロキシの唯一存在
-	all c:Cache | c in Alice.servers.cache and c in HTTPIntermediary.cache
+	one Uri
+
+	//キャッシュはブラウザに唯一存在
+	all c:Cache | c in Browser.cache
 
 	//端末の所有者を設定
 	all p:Principal |	//全てのユーザは一つの端末しか管理しない
 		one c:HTTPConformist |
 			c in p.(servers + httpClients)
 	all b:Browser | b in Alice.httpClients	//全てのBrowserはAliceに管理される
-	all b:HTTPServer | b in Alice.servers	//全てのServerはAliceに管理される
+	all s:HTTPServer | s in Alice.servers	//全てのServerはAliceに管理される
+
+	//中継者の動作
+	all tr:HTTPTransaction |{
+		tr.request.to in HTTPIntermediary implies{
+			one tr':HTTPTransaction |{
+				tr'.request.from in HTTPIntermediary
+				tr'.request.to in HTTPServer
+
+				//tr'.cause = tr
+
+				//tr.req -> tr'.req -> tr'.res -> tr.res
+				tr'.request.current = tr.request.current.next
+				tr'.response.current = tr'.request.current.next
+				tr.response.current = tr'.response.current.next
+			}
+		}
+	}
+
+	//tr1 client <-> proxy(Attacker)
+	//tr2 proxy <-> server1
+	//tr3 client <-> proxy
+	//tr4 proxy <-> server2
+	//tr5 client <-> server1 (or server2)
+
+	one disj tr1,tr3:HTTPTransaction |{
+		tr1.request.from in HTTPClient
+		tr1.request.to in HTTPIntermediary
+		tr3.request.from in HTTPClient
+		tr3.request.to in HTTPIntermediary
+
+		tr3.request.current in tr1.response.current.*next
+		tr3.cause = tr1
+	}
+
+	some tr2,tr4:HTTPTransaction |{
+		tr2.request.from in HTTPProxy
+		tr2.request.to in HTTPServer
+		tr4.request.from in HTTPProxy
+		tr4.request.to in HTTPServer
+		tr2.request.to != tr4.request.to
+	}
+
+	one tr5:HTTPTransaction |{
+		tr5.request.from in HTTPClient
+		tr5.request.to in HTTPServer
+		one tr5.re_res
+
+		all tr:HTTPTransaction | (one tr.response implies tr5.request.current in tr.response.current.*next)
+	}
+
+	//攻撃者によるbodyの改ざん
+	all tr,tr':HTTPTransaction |{
+		{
+			tr.request.from in HTTPClient
+			tr.request.to in HTTPIntermediary
+			tr'.request.from in HTTPIntermediary
+			tr'.request.to in HTTPServer
+		}implies{
+			tr.response.body != tr'.response.body
+		}
+	}
+} for 10
+
+//Cross-origin BCP Attack (prepare)
+//ブラウザキャッシュへの汚染まで
+run Cross_origin_BCP_prepare{
+	#HTTPRequest = 4
+	#HTTPResponse = 4
+
+	#Browser = 1
+	#HTTPServer = 2
+	#HTTPProxy = 1
+	#Cache = 1
+
+	#Principal = 4
+	#Alice = 3
+
+	one Uri
+
+	//キャッシュはブラウザに唯一存在
+	all c:Cache | c in Browser.cache
+
+	//端末の所有者を設定
+	all p:Principal |	//全てのユーザは一つの端末しか管理しない
+		one c:HTTPConformist |
+			c in p.(servers + httpClients)
+	all b:Browser | b in Alice.httpClients	//全てのBrowserはAliceに管理される
+	all s:HTTPServer | s in Alice.servers	//全てのServerはAliceに管理される
 
 	//通信イベントを作成
-	one tr1,tr2,tr3,tr4:HTTPTransaction |{
-		//tr1 client1 <-> proxy1
+	some disj tr1,tr2,tr3,tr4:HTTPTransaction |{
+		//tr1 client <-> proxy(Attacker)
 		tr1.request.from in HTTPClient
-		(tr1.request.to in HTTPProxy and tr1.request.to in Alice.servers)
+		tr1.request.to in HTTPProxy
 
-		//tr2 proxy1 <-> proxy2(Attacker's)
-		(tr2.request.from in HTTPProxy and tr2.request.from in Alice.servers)
-		(tr2.request.to in HTTPProxy and tr2.request.to !in Alice.servers)
+		//tr2 proxy <-> server1
+		tr2.request.from in HTTPProxy
+		tr2.request.to in HTTPServer
 
-		//tr3 proxy2 <-> Server
-		(tr3.request.from in HTTPProxy and tr3.request.from !in Alice.servers)
-		tr3.request.to in HTTPServer
+		//tr3 client <-> proxy
+		tr3.request.from in HTTPClient
+		tr3.request.to in HTTPProxy
 
-		//tr4 client2 <-> proxy1
-		tr4.request.from in HTTPClient
-		(tr4.request.to in HTTPProxy and tr4.request.to in Alice.servers)
-		tr4.request.from != tr1.request.from
-		one tr4.re_res
+		//tr4 proxy <-> server2
+		tr4.request.from in HTTPProxy
+		tr4.request.to in HTTPServer
+		tr4.request.to != tr2.request.to
 
 		//トランザクションの発生順序
 		tr2.request.current in tr1.request.current.*next
-		tr3.request.current in tr2.request.current.*next
-		tr2.response.current in tr3.response.current.*next
 		tr1.response.current in tr2.response.current.*next
-		tr4.request.current in tr1.response.current.*next
+		tr3.request.current in tr1.response.current.*next
+		tr4.request.current in tr3.request.current.*next
+		tr3.response.current in tr4.response.current.*next
 
 		//Attackerによるレスポンス改変
-		tr2.response.body != tr3.response.body
+		tr1.response.body != tr2.response.body
+		tr3.response.body != tr4.response.body
+
+		//リクエストの誘発
+		tr3.cause = tr1
+
+		//ブラウザキャッシュのレスポンス格納
+		no tr2.afterState.dif.store
+		one tr4.afterState.dif.store
 	}
 } for 8
 

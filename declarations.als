@@ -34,6 +34,9 @@ fact MoveOfIntermediary{
 			some tr':HTTPTransaction |{
 				tr != tr'
 
+				//通信の発生元
+				tr'.cause = tr
+
 				//tr.req -> tr'.req -> tr'.res -> tr.res
 				tr'.request.current in tr.request.current.*next
 				tr.response.current in tr'.response.current.*next
@@ -137,6 +140,7 @@ pred checkVerification[str:StateTransaction]{
 	{
 		str' != str
 		one str'.response	//検証のレスポンスが存在する
+		str'.cause = str	//検証の通信の発生元
 
 		str'.request.current in str.request.current.*next	//tr.request => tr'.request
 		str.re_res.current in str'.response.current.*next	//tr'.response => tr.reuse
